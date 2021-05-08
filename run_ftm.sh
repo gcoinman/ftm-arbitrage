@@ -1,0 +1,1 @@
+brownie networks add "Fantom Opera" ftm chainid=250 host=https://rpcapi.fantom.network
