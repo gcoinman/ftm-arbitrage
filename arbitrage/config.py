@@ -56,7 +56,7 @@ search_stop_threshold = 0.95
 
 fee = 0.0003
 # dex slippage set 1/1000
-slippage_numerator = 998
+slippage_numerator = 999
 slippage_senominator = 1000
 
 min_profit0 = 3

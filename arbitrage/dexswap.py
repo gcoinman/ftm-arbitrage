@@ -171,7 +171,7 @@ class DexSwap(object):
         tx.wait(1)
 
     # @func_set_timeout(28)
-    def sell(self, base_asset, quote_asset, amount_in):
+    def sell(self, base_asset, quote_asset, amount_in, min_amount_out):
         amount_in = int(amount_in)
         org_amount_in = amount_in
         amount_out = 0
@@ -194,6 +194,8 @@ class DexSwap(object):
             base_asset = base_asset.replace(dexname, '')
             quote_asset = quote_asset.replace(dexname, '')
             amount_out = self.getOutputAmount(amount_in, base_asset, quote_asset, dexname)
+            if amount_out * 10 ** (18 - self.precisions[quote_asset]) < min_amount_out * 9999 / 10000:
+                raise Exception('current amout_out is {:.4f}, min_amount_out is {:.4f}'.format(amount_out / 10 ** (self.precisions[quote_asset]), min_amount_out / 10 ** 18))
             org_amount_out = amount_out
             amount_out = int(amount_out * slippage_numerator / slippage_senominator)
             eth_amount = 0
@@ -254,7 +256,7 @@ class DexSwap(object):
         finally:
             return succeed, amount_out, gasfee
 
-    def buy(self, base_asset, quote_asset, amount_in):
+    def buy(self, base_asset, quote_asset, amount_in, min_amount_out):
         amount_in = int(amount_in)
         amount_out = 0
         gasfee = 0
@@ -276,6 +278,8 @@ class DexSwap(object):
             quote_asset = quote_asset.replace(dexname, '')
             amount_in = amount_in // 10 ** (18 - self.precisions[quote_asset])
             amount_out = self.getOutputAmount(amount_in, quote_asset, base_asset, dexname)
+            if amount_out * 10 ** (18 - self.precisions[base_asset]) < min_amount_out * 9999 / 10000:
+                raise Exception('current amout_out is {:.4f}, min_amount_out is {:.4f}'.format(amount_out / 10 ** (self.precisions[base_asset]), min_amount_out / 10 ** 18))
             org_amount_out = amount_out
             amount_out = int(amount_out * slippage_numerator / slippage_senominator)
             if quote_asset == 'FTM':
@@ -338,6 +342,14 @@ class DexSwap(object):
             self.reconnect()
         finally:
             return succeed, amount_out, gasfee
+
+    def extGetOutputAmount(self, amountIn, tokenIn, tokenOut, dex_name):
+        asset_in = tokenIn.replace(dex_name, '')
+        real_input_amount = int(amountIn / 10 ** (18 - self.precisions[asset_in]))
+        output_amt = self.getOutputAmount(real_input_amount, tokenIn, tokenOut, dex_name)
+        asset_out = tokenOut.replace(dex_name, '')
+        output_amt = output_amt * 10 ** (18 - self.precisions[asset_out])
+        return output_amt
 
     def getOutputAmount(self, amountIn, tokenIn, tokenOut, dex_name):
         ti = tokenIn.replace(dex_name, '')
@@ -404,7 +416,7 @@ class DexSwap(object):
         return price, ret_current_commitment
 
     # @func_set_timeout(28)
-    def sell_multi_hop(self, base_asset, mid_asset, quote_asset, amount_in):
+    def sell_multi_hop(self, base_asset, mid_asset, quote_asset, amount_in, min_amount_out):
         amount_in = int(amount_in)
         org_amount_in = amount_in
         amount_out = 0
@@ -422,12 +434,15 @@ class DexSwap(object):
                 router = self.spooky_router
                 router_addr = spooky_router_address
                 dexname = 'SPKY'
+            else:
+                raise Exception('sell_multi_hop do not have dexname')
 
             amount_in = amount_in // 10 ** (18 - self.precisions[base_asset])
             base_asset = base_asset.replace(dexname, '')
             quote_asset = quote_asset.replace(dexname, '')
             amount_out = self.getOutputAmountMultiHop(amount_in, base_asset, mid_asset, quote_asset, dexname)
-            print(amount_in / 10 ** self.precisions[base_asset], amount_out / 10 ** self.precisions[quote_asset])
+            if amount_out * 10 ** (18 - self.precisions[quote_asset]) < min_amount_out * 9999 / 10000:
+                raise Exception('current amout_out is {:.4f}, min_amount_out is {:.4f}'.format(amount_out / 10 ** (self.precisions[quote_asset]), min_amount_out / 10 ** 18))
             org_amount_out = amount_out
             amount_out = int(amount_out * slippage_numerator / slippage_senominator)
             eth_amount = 0
@@ -480,7 +495,7 @@ class DexSwap(object):
         finally:
             return succeed, amount_out, gasfee
 
-    def buy_multi_hop(self, base_asset, mid_asset, quote_asset, amount_in):
+    def buy_multi_hop(self, base_asset, mid_asset, quote_asset, amount_in, min_amount_out):
         amount_in = int(amount_in)
         amount_out = 0
         gasfee = 0
@@ -497,12 +512,15 @@ class DexSwap(object):
                 router = self.spooky_router
                 router_addr = spooky_router_address
                 dexname = 'SPKY'
+            else:
+                raise Exception('buy_multi_hop do not have dexname')
 
             base_asset = base_asset.replace(dexname, '')
             quote_asset = quote_asset.replace(dexname, '')
             amount_in = amount_in // 10 ** (18 - self.precisions[quote_asset])
             amount_out = self.getOutputAmountMultiHop(amount_in, quote_asset, mid_asset, base_asset, dexname)
-            print(amount_in / 10 ** self.precisions[base_asset], amount_out / 10 ** self.precisions[quote_asset])
+            if amount_out * 10 ** (18 - self.precisions[base_asset]) < min_amount_out * 9999 / 10000:
+                raise Exception('current amout_out is {:.4f}, min_amount_out is {:.4f}'.format(amount_out / 10 ** (self.precisions[base_asset]), min_amount_out / 10 ** 18))
             org_amount_out = amount_out
             amount_out = int(amount_out * slippage_numerator / slippage_senominator)
             path = [eval(quote_asset), WFTM, eval(base_asset)]
@@ -585,6 +603,15 @@ class DexSwap(object):
             nl = len(all_pairs)
         return multi_pairs
 
+
+    def extGetOutputAmountMultiHop(self, amountIn, tokenIn, tokenMid, tokenOut, dex_name):
+        asset_in = tokenIn.replace(dex_name, '')
+        real_input_amount = int(amountIn / 10 ** (18 - self.precisions[asset_in]))
+        output_amt = self.getOutputAmountMultiHop(real_input_amount, tokenIn, tokenMid, tokenOut, dex_name)
+        asset_out = tokenOut.replace(dex_name, '')
+        output_amt = output_amt * 10 ** (18 - self.precisions[asset_out])
+        return output_amt
+
     def getOutputAmountMultiHop(self, amountIn, tokenIn, tokenMid, tokenOut, dex_name):
         amount0 = self.getOutputAmount(amountIn, tokenIn, tokenMid, dex_name)
         amount1 = self.getOutputAmount(amount0, tokenMid, tokenOut, dex_name)
@@ -608,7 +635,7 @@ class DexSwap(object):
                 return output_amt / input_amount
         except ZeroDivisionError:
             print('ZeroDivisionError:', base_asset, mid_asset, quote_asset, side, input_amount, dex_name)
-
+            
     def binary_search_multi_hop(self, base_asset, mid_asset, quote_asset, current_commitment, side, price_limit, dex_name):
         max_search = 100
         max_current_commitment = current_commitment
@@ -713,12 +740,14 @@ class DexSwap(object):
 if __name__ == "__main__":
     log = Logger('all.log',level='debug')
     dex_swap = DexSwap(log)
+    print(dex_swap.multi_pairs)
+    print(dex_swap.spooky_multi_pairs)
     # dex_swap.approve_spiex_router('USDT')
     # dex_swap.find_multi_paths()
     # print(dex_swap.spooky_multi_pairs)
     # dex_swap.spiex_get_pairs()
     # dex_swap.spooky_get_pairs()
-    dex_swap.check_allowance()
+    # dex_swap.check_allowance()
     # for pair in spooky_pairs:
     #     symbols = pair.split('_')
     #     print(symbols[0])

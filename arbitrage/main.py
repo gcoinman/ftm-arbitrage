@@ -71,7 +71,7 @@ def main_new_arbitrage(dex_side, base_asset, quote_asset, amount_in, output_amou
     gasfee = 0
     try:
         if dex_side == 'buy':
-            ret, real_output_amount, gasfee = dex_swap.buy(base_asset, quote_asset+dexname, amount_in)
+            ret, real_output_amount, gasfee = dex_swap.buy(base_asset, quote_asset+dexname, amount_in, output_amount)
             if not ret:
                 binance.bal_reduced[base_asset] -= output_amount / 10 ** 18
                 dex_swap.bal_reduced[quote_asset] -= amount_in	            
@@ -94,7 +94,7 @@ def main_new_arbitrage(dex_side, base_asset, quote_asset, amount_in, output_amou
             binance.bal_reduced[base_asset] -= output_amount / 10 ** 18
             total_profit += profit
         elif dex_side == 'sell':
-            ret, real_output_amount, gasfee = dex_swap.sell(base_asset, quote_asset+dexname, amount_in)
+            ret, real_output_amount, gasfee = dex_swap.sell(base_asset, quote_asset+dexname, amount_in, output_amount)
             if not ret:
                 binance.bal_reduced[quote_asset] -= output_amount / 10 ** 18
                 dex_swap.bal_reduced[base_asset] -= amount_in
@@ -181,7 +181,7 @@ def spiex_pair_arbitrage():
                 if dex_trade_amount * quote_buy_price < 40 * 10 ** 18:
                     continue
                 price, dex_quote_trade_amount = dex_swap.binary_search(symbols[0], symbols[1]+dexname, dex_trade_amount, 'buy', price_limit, dexname)
-                cex_base_sell_amount = dex_quote_trade_amount / price / 10 ** 18
+                cex_base_sell_amount = dex_swap.extGetOutputAmount(dex_quote_trade_amount, symbols[1], symbols[0], dexname) / 10 ** 18
                 cex_quote_buy_amount = dex_quote_trade_amount / 10 ** 18
                 profit = cex_base_sell_amount * base_sell_price * (1 - fee) - cex_quote_buy_amount * quote_buy_price * (1 + fee)
                 if profit < min_profit:
@@ -190,8 +190,8 @@ def spiex_pair_arbitrage():
                 print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex sell price is {:.4f}, amount is {:.4f}, dex buy price is {:.4f}'.format(dexname, s_pair, profit, cex_sell_price, cex_base_sell_amount, price))
                 binance.bal_reduced[symbols[0]] += cex_base_sell_amount * 1.01
                 dex_swap.bal_reduced[symbols[1]] += dex_trade_amount * 1.01
-                # main_new_arbitrage('buy', symbols[0], symbols[1], dex_quote_trade_amount, dex_quote_trade_amount / price, dexname)
-                tasks[s_pair] = threadpool.submit(main_new_arbitrage, 'buy', symbols[0], symbols[1], dex_quote_trade_amount, dex_quote_trade_amount / price, dexname)
+                # main_new_arbitrage('buy', symbols[0], symbols[1], dex_quote_trade_amount, cex_base_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(main_new_arbitrage, 'buy', symbols[0], symbols[1], dex_quote_trade_amount, cex_base_sell_amount * 10 ** 18, dexname)
                 continue
             elif cex_buy_price < dex_sell_price / (1 + price_percent_difference_threshold):
                 dex_base_bal = dex_swap.asset_balance(symbols[0])
@@ -202,17 +202,17 @@ def spiex_pair_arbitrage():
                 if dex_trade_amount * base_buy_price < 40 * 10 ** 18:
                     continue
                 price, dex_base_trade_amount = dex_swap.binary_search(symbols[0], symbols[1]+dexname, dex_trade_amount, 'sell', price_limit, dexname)
-                cex_quote_sell_amount = (dex_base_trade_amount * price) / 10 ** 18
+                cex_quote_sell_amount = dex_swap.extGetOutputAmount(dex_base_trade_amount, symbols[0], symbols[1], dexname) / 10 ** 18
                 cex_base_buy_amount = dex_base_trade_amount / 10 ** 18
                 profit = cex_quote_sell_amount * quote_sell_price * (1 - fee) - cex_base_buy_amount * base_buy_price * (1 + fee)
                 if profit < min_profit:
                     # print('{} {} trade amount is {:.4f}, profit is {:.4f} USDT, too low!'.format(dexname, s_pair, cex_quote_sell_amount, profit))
                     continue
-                print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex buy price is {:.4f}, amount is {:.4f}, dex sell price is {:.4f}'.format(dexname, s_pair, profit, cex_buy_price, cex_base_buy_amount, dex_sell_price))
+                print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex buy price is {:.4f}, amount is {:.4f}, dex sell amount is {}, dex sell price is {:.4f}'.format(dexname, s_pair, profit, cex_buy_price, cex_base_buy_amount, cex_quote_sell_amount, dex_sell_price))
                 binance.bal_reduced[symbols[1]] += cex_quote_sell_amount * 1.01
                 dex_swap.bal_reduced[symbols[0]] += dex_trade_amount * 1.01
-                # main_new_arbitrage('sell', symbols[0], symbols[1], dex_base_trade_amount, dex_base_trade_amount * price, dexname)
-                tasks[s_pair] = threadpool.submit(main_new_arbitrage, 'sell', symbols[0], symbols[1], dex_base_trade_amount, dex_base_trade_amount * price, dexname)
+                # main_new_arbitrage('sell', symbols[0], symbols[1], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(main_new_arbitrage, 'sell', symbols[0], symbols[1], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
                 continue
     except func_timeout.exceptions.FunctionTimedOut:
         print('main_pair_arbitrage time out')
@@ -264,7 +264,7 @@ def spooky_pair_arbitrage():
                 if dex_trade_amount * quote_buy_price < 40 * 10 ** 18:
                     continue
                 price, dex_quote_trade_amount = dex_swap.binary_search(symbols[0], symbols[1]+dexname, dex_trade_amount, 'buy', price_limit, dexname)
-                cex_base_sell_amount = dex_quote_trade_amount / price / 10 ** 18
+                cex_base_sell_amount = dex_swap.extGetOutputAmount(dex_quote_trade_amount, symbols[1], symbols[0], dexname) / 10 ** 18
                 cex_quote_buy_amount = dex_quote_trade_amount / 10 ** 18
                 profit = cex_base_sell_amount * base_sell_price * (1 - fee) - cex_quote_buy_amount * quote_buy_price * (1 + fee)
                 if profit < min_profit:
@@ -273,8 +273,8 @@ def spooky_pair_arbitrage():
                 print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex sell price is {:.4f}, amount is {:.4f}, dex buy price is {:.4f}'.format(dexname, s_pair, profit, cex_sell_price, cex_base_sell_amount, price))
                 binance.bal_reduced[symbols[0]] += cex_base_sell_amount * 1.01
                 dex_swap.bal_reduced[symbols[1]] += dex_trade_amount * 1.01
-                # main_new_arbitrage('buy', symbols[0], symbols[1], dex_quote_trade_amount, dex_quote_trade_amount / price, dexname)
-                tasks[s_pair] = threadpool.submit(main_new_arbitrage, 'buy', symbols[0], symbols[1], dex_quote_trade_amount, dex_quote_trade_amount / price, dexname)
+                # main_new_arbitrage('buy', symbols[0], symbols[1], dex_quote_trade_amount,  cex_base_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(main_new_arbitrage, 'buy', symbols[0], symbols[1], dex_quote_trade_amount,  cex_base_sell_amount * 10 ** 18, dexname)
                 continue
             elif cex_buy_price < dex_sell_price / (1 + price_percent_difference_threshold):
                 dex_base_bal = dex_swap.asset_balance(symbols[0])
@@ -285,7 +285,7 @@ def spooky_pair_arbitrage():
                 if dex_trade_amount * base_buy_price < 40 * 10 ** 18:
                     continue
                 price, dex_base_trade_amount = dex_swap.binary_search(symbols[0], symbols[1]+dexname, dex_trade_amount, 'sell', price_limit, dexname)
-                cex_quote_sell_amount = (dex_base_trade_amount * price) / 10 ** 18
+                cex_quote_sell_amount = dex_swap.extGetOutputAmount(dex_base_trade_amount, symbols[0], symbols[1], dexname) / 10 ** 18
                 cex_base_buy_amount = dex_base_trade_amount / 10 ** 18
                 profit = cex_quote_sell_amount * quote_sell_price * (1 - fee) - cex_base_buy_amount * base_buy_price * (1 + fee)
                 if profit < min_profit:
@@ -294,8 +294,8 @@ def spooky_pair_arbitrage():
                 print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex buy price is {:.4f}, amount is {:.4f}, dex sell price is {:.4f}'.format(dexname, s_pair, profit, cex_buy_price, cex_base_buy_amount, dex_sell_price))
                 binance.bal_reduced[symbols[1]] += cex_quote_sell_amount * 1.01
                 dex_swap.bal_reduced[symbols[0]] += dex_trade_amount * 1.01
-                # main_new_arbitrage('sell', symbols[0], symbols[1], dex_base_trade_amount, dex_base_trade_amount * price, dexname)
-                tasks[s_pair] = threadpool.submit(main_new_arbitrage, 'sell', symbols[0], symbols[1], dex_base_trade_amount, dex_base_trade_amount * price, dexname)
+                # main_new_arbitrage('sell', symbols[0], symbols[1], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(main_new_arbitrage, 'sell', symbols[0], symbols[1], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
                 continue
     except func_timeout.exceptions.FunctionTimedOut:
         print('main_pair_arbitrage time out')
@@ -309,7 +309,7 @@ def multi_hop_new_arbitrage(dex_side, base_asset, mid_asset, quote_asset, amount
     gasfee = 0
     try:
         if dex_side == 'buy':
-            ret, real_output_amount, gasfee = dex_swap.buy_multi_hop(base_asset, mid_asset, quote_asset + dexname, amount_in)
+            ret, real_output_amount, gasfee = dex_swap.buy_multi_hop(base_asset, mid_asset, quote_asset + dexname, amount_in, output_amount)
             if not ret:
                 binance.bal_reduced[base_asset] -= output_amount / 10 ** 18
                 dex_swap.bal_reduced[quote_asset] -= amount_in	            
@@ -321,18 +321,18 @@ def multi_hop_new_arbitrage(dex_side, base_asset, mid_asset, quote_asset, amount
             base_symbol = base_asset+'USDT'
             base_depth = get_valid_depth(binance.depths, base_symbol)
             _, _, cex_sell_price, _ = get_depth_volume_price(4, base_depth)
-            if base_symbol != 'USDTUSDT' and base_symbol != 'DAIUSDT':
+            if base_symbol != 'USDTUSDT' and base_symbol != 'DAIUSDT' and base_symbol != 'USDCUSDT':
                 binance.sell(base_asset, cex_token_sell_amount, cex_sell_price)
             quote_symbol = quote_asset+'USDT'
             quote_depth = get_valid_depth(binance.depths, quote_symbol)
             quote_buy_price, _, _, _ = get_depth_volume_price(4, quote_depth)
-            if quote_symbol != 'USDTUSDT' and quote_symbol != 'DAIUSDT':
+            if quote_symbol != 'USDTUSDT' and quote_symbol != 'DAIUSDT' and quote_symbol != 'USDCUSDT':
                 binance.buy(quote_asset, quote_token_buy_amount, quote_buy_price)
             profit = cex_token_sell_amount * cex_sell_price * (1 - fee) - quote_token_buy_amount * quote_buy_price - gasfee * btm_buy_price
             binance.bal_reduced[base_asset] -= output_amount / 10 ** 18
             total_profit += profit
         elif dex_side == 'sell':
-            ret, real_output_amount, gasfee = dex_swap.sell_multi_hop(base_asset, mid_asset, quote_asset + dexname, amount_in)
+            ret, real_output_amount, gasfee = dex_swap.sell_multi_hop(base_asset, mid_asset, quote_asset + dexname, amount_in, output_amount)
             if not ret:
                 binance.bal_reduced[quote_asset] -= output_amount / 10 ** 18
                 dex_swap.bal_reduced[base_asset] -= amount_in
@@ -344,12 +344,12 @@ def multi_hop_new_arbitrage(dex_side, base_asset, mid_asset, quote_asset, amount
             base_symbol = base_asset+'USDT'
             base_depth = get_valid_depth(binance.depths, base_symbol)
             cex_buy_price, _, _, _ = get_depth_volume_price(3, base_depth)
-            if base_symbol != 'USDTUSDT' and base_symbol != 'DAIUSDT':
+            if base_symbol != 'USDTUSDT' and base_symbol != 'DAIUSDT' and base_symbol != 'USDCUSDT':
                 binance.buy(base_asset, cex_token_buy_amount, cex_buy_price)
             quote_symbol = quote_asset+'USDT'
             quote_depth = get_valid_depth(binance.depths, quote_symbol)
             _, _, quote_sell_price, _ = get_depth_volume_price(3, quote_depth)
-            if quote_symbol != 'USDTUSDT' and quote_symbol != 'DAIUSDT':
+            if quote_symbol != 'USDTUSDT' and quote_symbol != 'DAIUSDT' and quote_symbol != 'USDCUSDT':
                 binance.sell(quote_asset, quote_token_sell_amount, quote_sell_price)
             profit = quote_token_sell_amount * quote_sell_price - cex_token_buy_amount * cex_buy_price * (1 + fee) - gasfee * btm_buy_price
             binance.bal_reduced[quote_asset] -= quote_token_sell_amount
@@ -409,7 +409,7 @@ def spiex_multi_hop_arbitrage():
                 if dex_trade_amount * quote_buy_price / btm_buy_price < 10 ** 18:
                     continue
                 price, dex_quote_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'buy', price_limit, dexname)
-                cex_base_sell_amount = dex_quote_trade_amount / price / 10 ** 18
+                cex_base_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_quote_trade_amount, symbols[2], symbols[1], symbols[0], dexname) / 10 ** 18
                 cex_quote_buy_amount = dex_quote_trade_amount / 10 ** 18
                 profit = cex_base_sell_amount * base_sell_price * (1 - fee) - cex_quote_buy_amount * quote_buy_price * (1 + fee)
                 if profit < min_profit:
@@ -418,8 +418,8 @@ def spiex_multi_hop_arbitrage():
                 print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex sell price is {:.4f}, amount is {:.4f}, dex buy price is {:.4f}'.format(dexname, s_pair, profit, cex_sell_price, cex_base_sell_amount, price))
                 binance.bal_reduced[symbols[0]] += cex_base_sell_amount * 1.01
                 dex_swap.bal_reduced[symbols[2]] += dex_trade_amount * 1.01
-                # multi_hop_new_arbitrage('buy', symbols[0], symbols[1], symbols[2], dex_quote_trade_amount, dex_quote_trade_amount / price, dexname)
-                tasks[s_pair] = threadpool.submit(multi_hop_new_arbitrage, 'buy', symbols[0], symbols[1], symbols[2], dex_quote_trade_amount, dex_quote_trade_amount / price, dexname)
+                # multi_hop_new_arbitrage('buy', symbols[0], symbols[1], symbols[2], dex_quote_trade_amount, cex_base_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(multi_hop_new_arbitrage, 'buy', symbols[0], symbols[1], symbols[2], dex_quote_trade_amount, cex_base_sell_amount * 10 ** 18, dexname)
                 continue
             elif cex_buy_price < dex_sell_price / (1 + price_percent_difference_threshold):
                 dex_base_bal = dex_swap.asset_balance(symbols[0])
@@ -430,7 +430,7 @@ def spiex_multi_hop_arbitrage():
                 if dex_trade_amount * base_buy_price / btm_buy_price < 10 ** 18:
                     continue
                 price, dex_base_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'sell', price_limit, dexname)
-                cex_quote_sell_amount = (dex_base_trade_amount * price) / 10 ** 18
+                cex_quote_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_base_trade_amount, symbols[0], symbols[1], symbols[2], dexname) / 10 ** 18
                 cex_base_buy_amount = dex_base_trade_amount / 10 ** 18
                 profit = cex_quote_sell_amount * quote_sell_price * (1 - fee) - cex_base_buy_amount * base_buy_price * (1 + fee)
                 if profit < min_profit:
@@ -439,8 +439,8 @@ def spiex_multi_hop_arbitrage():
                 print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex buy price is {:.4f}, amount is {:.4f}, dex sell price is {:.4f}'.format(dexname, s_pair, profit, cex_buy_price, cex_base_buy_amount, dex_sell_price))
                 binance.bal_reduced[symbols[2]] += cex_quote_sell_amount * 1.01
                 dex_swap.bal_reduced[symbols[0]] += dex_trade_amount * 1.01
-                # multi_hop_new_arbitrage('sell', symbols[0], symbols[1], symbols[2], dex_base_trade_amount, dex_base_trade_amount * price, dexname)
-                tasks[s_pair] = threadpool.submit(multi_hop_new_arbitrage, 'sell', symbols[0], symbols[1], symbols[2], dex_base_trade_amount, dex_base_trade_amount * price, dexname)
+                # multi_hop_new_arbitrage('sell', symbols[0], symbols[1], symbols[2], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(multi_hop_new_arbitrage, 'sell', symbols[0], symbols[1], symbols[2], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
                 continue
     except func_timeout.exceptions.FunctionTimedOut:
         print('main_pair_arbitrage time out')
@@ -489,7 +489,7 @@ def spooky_multi_hop_arbitrage():
                 if dex_trade_amount * quote_buy_price / btm_buy_price < 10 ** 18:
                     continue
                 price, dex_quote_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'buy', price_limit, dexname)
-                cex_base_sell_amount = dex_quote_trade_amount / price / 10 ** 18
+                cex_base_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_quote_trade_amount, symbols[2], symbols[1], symbols[0], dexname) / 10 ** 18
                 cex_quote_buy_amount = dex_quote_trade_amount / 10 ** 18
                 profit = cex_base_sell_amount * base_sell_price * (1 - fee) - cex_quote_buy_amount * quote_buy_price * (1 + fee)
                 if profit < min_profit:
@@ -498,8 +498,8 @@ def spooky_multi_hop_arbitrage():
                 print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex sell price is {:.4f}, amount is {:.4f}, dex buy price is {:.4f}'.format(dexname, s_pair, profit, cex_sell_price, cex_base_sell_amount, price))
                 binance.bal_reduced[symbols[0]] += cex_base_sell_amount * 1.01
                 dex_swap.bal_reduced[symbols[2]] += dex_trade_amount * 1.01
-                # multi_hop_new_arbitrage('buy', symbols[0], symbols[1], symbols[2], dex_quote_trade_amount, dex_quote_trade_amount / price, dexname)
-                tasks[s_pair] = threadpool.submit(multi_hop_new_arbitrage, 'buy', symbols[0], symbols[1], symbols[2], dex_quote_trade_amount, dex_quote_trade_amount / price, dexname)
+                # multi_hop_new_arbitrage('buy', symbols[0], symbols[1], symbols[2], dex_quote_trade_amount, cex_base_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(multi_hop_new_arbitrage, 'buy', symbols[0], symbols[1], symbols[2], dex_quote_trade_amount, cex_base_sell_amount * 10 ** 18, dexname)
                 continue
             elif cex_buy_price < dex_sell_price / (1 + price_percent_difference_threshold):
                 dex_base_bal = dex_swap.asset_balance(symbols[0])
@@ -510,7 +510,7 @@ def spooky_multi_hop_arbitrage():
                 if dex_trade_amount * base_buy_price / btm_buy_price < 10 ** 18:
                     continue
                 price, dex_base_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'sell', price_limit, dexname)
-                cex_quote_sell_amount = (dex_base_trade_amount * price) / 10 ** 18
+                cex_quote_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_base_trade_amount, symbols[0], symbols[1], symbols[2], dexname) / 10 ** 18
                 cex_base_buy_amount = dex_base_trade_amount / 10 ** 18
                 profit = cex_quote_sell_amount * quote_sell_price * (1 - fee) - cex_base_buy_amount * base_buy_price * (1 + fee)
                 if profit < min_profit:
@@ -519,8 +519,8 @@ def spooky_multi_hop_arbitrage():
                 print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex buy price is {:.4f}, amount is {:.4f}, dex sell price is {:.4f}'.format(dexname, s_pair, profit, cex_buy_price, cex_base_buy_amount, dex_sell_price))
                 binance.bal_reduced[symbols[2]] += cex_quote_sell_amount * 1.01
                 dex_swap.bal_reduced[symbols[0]] += dex_trade_amount * 1.01
-                # multi_hop_new_arbitrage('sell', symbols[0], symbols[1], symbols[2], dex_base_trade_amount, dex_base_trade_amount * price, dexname)
-                tasks[s_pair] = threadpool.submit(multi_hop_new_arbitrage, 'sell', symbols[0], symbols[1], symbols[2], dex_base_trade_amount, dex_base_trade_amount * price, dexname)
+                # multi_hop_new_arbitrage('sell', symbols[0], symbols[1], symbols[2], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(multi_hop_new_arbitrage, 'sell', symbols[0], symbols[1], symbols[2], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
                 continue
     except func_timeout.exceptions.FunctionTimedOut:
         print('main_pair_arbitrage time out')
