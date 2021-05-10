@@ -20,6 +20,7 @@ from func_timeout import func_set_timeout
 import traceback
 from web3.exceptions import TransactionNotFound
 import threading
+from web3 import Web3
 
 lock = threading.Lock()
 
@@ -39,6 +40,7 @@ class DexSwap(object):
         self.broadcast_finish = True
         self.multi_pairs = self.find_multi_paths()
         self.spooky_multi_pairs = self.spooky_find_multi_paths()
+        self.w3 = Web3(Web3.WebsocketProvider('wss://wsapi.fantom.network'))
 
     def init(self, login):
         network.connect('ftm')
@@ -58,6 +60,8 @@ class DexSwap(object):
         abi = json.loads(query_abi)
         self.query = Contract.from_abi("Query", '0x7CAE4F73eAFc482efA0d02205C6e6E71c3cdcEEd', abi)
         
+
+
     def get_precision(self):
         precisions = {}
         for asset in assets:
@@ -88,11 +92,53 @@ class DexSwap(object):
     def get_borrow_balance(self, asset):
         return 0
 
+    # def update_information(self):
+    #     asset_addrs = [eval(asset) for asset in assets[1:]]
+    #     pairs = [eval(pair+'SPIEX') for pair in spirit_pairs]
+    #     pairs += [eval(pair) for pair in spooky_pairs]
+    #     (reserves, balances) = self.query.get_all_information(self.acct, asset_addrs, pairs)
+    #     for i in range(len(assets)):
+    #         asset = assets[i]
+    #         free_balance = balances[i]
+    #         free_balance = free_balance * 10 ** (18 - self.precisions[asset])
+    #         self.balances[assets[i]] = free_balance
+
+    #     i = 0
+    #     for pair in spirit_pairs:
+    #         symbols = pair.split("_")
+    #         if symbols[0] == 'FTM':
+    #             base_address = WFTM
+    #         else:
+    #             base_address = eval(symbols[0])
+    #         if symbols[1] == 'FTM':
+    #             quote_address = WFTM
+    #         else:
+    #             quote_address = eval(symbols[1])
+    #         self.reserves[pair+'SPIEX'] = (reserves[i][0], reserves[i][1]) if int(base_address, 16) < int(quote_address, 16) else (reserves[i][1], reserves[i][0])
+    #         i += 1
+
+    #     for pair in spooky_pairs:
+    #         pair = pair.replace('SPKY', '')
+    #         symbols = pair.split("_")
+    #         if symbols[0] == 'FTM':
+    #             base_address = WFTM
+    #         else:
+    #             base_address = eval(symbols[0])
+    #         if symbols[1] == 'FTM':
+    #             quote_address = WFTM
+    #         else:
+    #             quote_address = eval(symbols[1])
+    #         self.reserves[pair+'SPKY'] = (reserves[i][0], reserves[i][1]) if int(base_address, 16) < int(quote_address, 16) else (reserves[i][1], reserves[i][0])
+    #         i += 1
+
+
     def update_information(self):
+        abi = json.loads(query_abi)
+        query = self.w3.eth.contract('0x7CAE4F73eAFc482efA0d02205C6e6E71c3cdcEEd', abi=abi)
         asset_addrs = [eval(asset) for asset in assets[1:]]
         pairs = [eval(pair+'SPIEX') for pair in spirit_pairs]
         pairs += [eval(pair) for pair in spooky_pairs]
-        (reserves, balances) = self.query.get_all_information(self.acct, asset_addrs, pairs)
+        (reserves, balances) = query.functions.get_all_information('0x9D945d909Ca91937d19563e30bB4DAc12C860189', asset_addrs, pairs).call()
         for i in range(len(assets)):
             asset = assets[i]
             free_balance = balances[i]
@@ -126,7 +172,6 @@ class DexSwap(object):
                 quote_address = eval(symbols[1])
             self.reserves[pair+'SPKY'] = (reserves[i][0], reserves[i][1]) if int(base_address, 16) < int(quote_address, 16) else (reserves[i][1], reserves[i][0])
             i += 1
-
 
     def get_reserve(self, base_asset, quote_asset):
         return self.reserves[base_asset + '_' + quote_asset]
