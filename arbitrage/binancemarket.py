@@ -149,6 +149,7 @@ class BinanceMarket(object):
     def margin_sell(self, asset, amount, price):
         sell_action = 'sell {}, amount {}, price {}'.format(asset, amount, price)
         order = None
+        failed = False
         try:
             precis = self.precisions[asset + 'USDT']
             price = round_down(price, precis[0])
@@ -160,7 +161,10 @@ class BinanceMarket(object):
                     amount = round_down(free_bal, precis[1])
                 else:
                     if not self.margin_borrow_asset(asset, bamount):
-                        raise Exception('margin borrow {} failed'.format(asset))
+                        self.log.logger.info('margin borrow {} failed'.format(asset))
+                        failed = True
+                        return
+                        # raise Exception('margin borrow {} failed'.format(asset))
             order = self.client.create_margin_order(
                 symbol=asset + 'USDT',
                 side=self.client.SIDE_SELL,
@@ -173,6 +177,8 @@ class BinanceMarket(object):
             self.log.logger.info('xxxxx--cex sell exception: {}'.format(str(e)))
             self.log.logger.info('xxxxx--cex sell exception: {}'.format(sell_action))
         finally:
+            if failed:
+                return
             if order is None or "clientOrderId" not in order:
                 self.log.logger.info('margin {}: order is none or sell clientOrderId not in order'.format(sell_action))
                 time.sleep(2)

@@ -6,6 +6,7 @@ import json
 import threading
 import sys
 import os
+from brownie import *
 file_path = os.path.dirname(os.path.realpath(__file__))
 parent_path = os.path.dirname(file_path)
 sys.path.append(parent_path)
@@ -58,7 +59,7 @@ dex_swap = DexSwap(log)
 binance = BinanceMarket(log)
 
 
-thread_count = 1
+thread_count = 3
 threadpool = ThreadPoolExecutor(max_workers=thread_count)
 tasks = {}
 
@@ -174,6 +175,10 @@ def spiex_pair_arbitrage():
             cex_sell_price = base_sell_price / quote_buy_price
             if cex_sell_price > dex_buy_price * (1 + price_percent_difference_threshold):
                 dex_quote_bal = dex_swap.asset_balance(symbols[1])
+                dex_base_bal = dex_swap.asset_balance(symbols[0])
+                if symbols[0] in max_on_chain_balances and max_on_chain_balances[symbols[0]] < dex_base_bal / 10 ** 18:
+                    print('{} dex balance={}, exceed max cap, dex cannot buy it'.format(symbols[0], dex_base_bal / 10 ** 18))
+                    continue
                 cex_base_bal = binance.get_balance_with_borrow(symbols[0])
                 max_quote_trade_amount = max_usdt_trade_amount / quote_buy_price
                 dex_trade_amount = min(10 ** 18 * max_quote_trade_amount, dex_quote_bal, 10 ** 18 * min(cex_base_bal, base_sell_volume) * cex_sell_price, 10 ** 18 * quote_buy_volume) * 98 / 100  
@@ -228,7 +233,7 @@ def spooky_pair_arbitrage():
         if ftm_depth is None:
             return
         btm_buy_price, _, _, _ = get_depth_volume_price(4, ftm_depth)
-        for s_pair in spirit_pairs:
+        for s_pair in spooky_pairs:
             org_pair = s_pair
             s_pair = s_pair.replace(dexname, '')
             symbols = s_pair.split("_")
@@ -257,6 +262,10 @@ def spooky_pair_arbitrage():
             cex_sell_price = base_sell_price / quote_buy_price
             if cex_sell_price > dex_buy_price * (1 + price_percent_difference_threshold):
                 dex_quote_bal = dex_swap.asset_balance(symbols[1])
+                dex_base_bal = dex_swap.asset_balance(symbols[0])
+                if symbols[0] in max_on_chain_balances and max_on_chain_balances[symbols[0]] < dex_base_bal / 10 ** 18:
+                    print('{} dex balance={}, exceed max cap, dex cannot buy it'.format(symbols[0], dex_base_bal / 10 ** 18))
+                    continue
                 cex_base_bal = binance.get_balance_with_borrow(symbols[0])
                 max_quote_trade_amount = max_usdt_trade_amount / quote_buy_price
                 dex_trade_amount = min(10 ** 18 * max_quote_trade_amount, dex_quote_bal, 10 ** 18 * min(cex_base_bal, base_sell_volume) * cex_sell_price, 10 ** 18 * quote_buy_volume) * 98 / 100  
@@ -302,6 +311,92 @@ def spooky_pair_arbitrage():
     except Exception as e:
         print(e)
 
+def sushi_pair_arbitrage():
+    global btm_buy_price
+    global busd_pair_assets
+    try:
+        dexname = 'SUSHIEX'
+        ftm_depth = get_valid_depth(binance.depths, 'FTMUSDT')
+        if ftm_depth is None:
+            return
+        btm_buy_price, _, _, _ = get_depth_volume_price(4, ftm_depth)
+        for s_pair in sushi_pairs:
+            org_pair = s_pair
+            s_pair = s_pair.replace(dexname, '')
+            symbols = s_pair.split("_")
+            base_depth = get_valid_depth(binance.depths, symbols[0]+'USDT')
+            quote_depth = get_valid_depth(binance.depths, symbols[1]+'USDT')
+            if base_depth is None or quote_depth is None:
+                print(symbols)
+                print('sushi base or quote depth is none')
+                continue
+            base_buy_price, base_buy_volume, base_sell_price, base_sell_volume = get_depth_volume_price(4, base_depth)
+            quote_buy_price, quote_buy_volume, quote_sell_price, quote_sell_volume = get_depth_volume_price(4, quote_depth)
+            # 同一个交易对只能有一个线程，防止重复交易
+            l = clear_complete_task(tasks)
+            # 超过10个线程后，会有线程被阻塞，影响实时成交，降低成功率
+            if l > thread_count:
+                print('working task > {}'.format(thread_count))
+                return
+            if s_pair in tasks:
+                continue
+            min_profit = min_profit1
+            base_min_amount = 200 / base_buy_price
+            quote_min_amount = 200 / quote_buy_price
+            dex_buy_price = dex_swap.get_price(symbols[0], symbols[1]+dexname, 'buy', quote_min_amount * 10 ** 18, dexname)
+            dex_sell_price = dex_swap.get_price(symbols[0], symbols[1]+dexname, 'sell', base_min_amount * 10 ** 18, dexname)
+            cex_buy_price = base_buy_price / quote_sell_price
+            cex_sell_price = base_sell_price / quote_buy_price
+            if cex_sell_price > dex_buy_price * (1 + price_percent_difference_threshold):
+                dex_quote_bal = dex_swap.asset_balance(symbols[1])
+                dex_base_bal = dex_swap.asset_balance(symbols[0])
+                if symbols[0] in max_on_chain_balances and max_on_chain_balances[symbols[0]] < dex_base_bal / 10 ** 18:
+                    print('{} dex balance={}, exceed max cap, dex cannot buy it'.format(symbols[0], dex_base_bal / 10 ** 18))
+                    continue
+                cex_base_bal = binance.get_balance_with_borrow(symbols[0])
+                max_quote_trade_amount = max_usdt_trade_amount / quote_buy_price
+                dex_trade_amount = min(10 ** 18 * max_quote_trade_amount, dex_quote_bal, 10 ** 18 * min(cex_base_bal, base_sell_volume) * cex_sell_price, 10 ** 18 * quote_buy_volume) * 98 / 100  
+                price_limit = (cex_sell_price / (1 + price_percent_difference_threshold))
+                if dex_trade_amount * quote_buy_price < 40 * 10 ** 18:
+                    continue
+                price, dex_quote_trade_amount = dex_swap.binary_search(symbols[0], symbols[1]+dexname, dex_trade_amount, 'buy', price_limit, dexname)
+                cex_base_sell_amount = dex_swap.extGetOutputAmount(dex_quote_trade_amount, symbols[1], symbols[0], dexname) / 10 ** 18
+                cex_quote_buy_amount = dex_quote_trade_amount / 10 ** 18
+                profit = cex_base_sell_amount * base_sell_price * (1 - fee) - cex_quote_buy_amount * quote_buy_price * (1 + fee)
+                if profit < min_profit:
+                    # print('{} {} trade amount is {:.4f}, profit is {:.4f} USDT, too low!'.format(dexname, s_pair, cex_quote_buy_amount, profit))
+                    continue
+                print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex sell price is {:.4f}, amount is {:.4f}, dex buy price is {:.4f}'.format(dexname, s_pair, profit, cex_sell_price, cex_base_sell_amount, price))
+                binance.bal_reduced[symbols[0]] += cex_base_sell_amount * 1.01
+                dex_swap.bal_reduced[symbols[1]] += dex_trade_amount * 1.01
+                # main_new_arbitrage('buy', symbols[0], symbols[1], dex_quote_trade_amount,  cex_base_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(main_new_arbitrage, 'buy', symbols[0], symbols[1], dex_quote_trade_amount,  cex_base_sell_amount * 10 ** 18, dexname)
+                continue
+            elif cex_buy_price < dex_sell_price / (1 + price_percent_difference_threshold):
+                dex_base_bal = dex_swap.asset_balance(symbols[0])
+                cex_quote_bal = binance.get_balance_with_borrow(symbols[1])
+                max_base_trade_amount = max_usdt_trade_amount / base_buy_price
+                dex_trade_amount = min(dex_base_bal, 10 ** 18 * max_base_trade_amount, 10 ** 18 * min(cex_quote_bal, quote_sell_volume) * quote_sell_price / base_buy_price, 10 ** 18 * base_buy_volume) * 98 / 100
+                price_limit = cex_buy_price * (1 + price_percent_difference_threshold)
+                if dex_trade_amount * base_buy_price < 40 * 10 ** 18:
+                    continue
+                price, dex_base_trade_amount = dex_swap.binary_search(symbols[0], symbols[1]+dexname, dex_trade_amount, 'sell', price_limit, dexname)
+                cex_quote_sell_amount = dex_swap.extGetOutputAmount(dex_base_trade_amount, symbols[0], symbols[1], dexname) / 10 ** 18
+                cex_base_buy_amount = dex_base_trade_amount / 10 ** 18
+                profit = cex_quote_sell_amount * quote_sell_price * (1 - fee) - cex_base_buy_amount * base_buy_price * (1 + fee)
+                if profit < min_profit:
+                    # print('{} {} trade amount is {:.4f}, profit is {:.4f} USDT, too low!'.format(dexname, s_pair, cex_quote_sell_amount, profit))
+                    continue
+                print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex buy price is {:.4f}, amount is {:.4f}, dex sell price is {:.4f}'.format(dexname, s_pair, profit, cex_buy_price, cex_base_buy_amount, dex_sell_price))
+                binance.bal_reduced[symbols[1]] += cex_quote_sell_amount * 1.01
+                dex_swap.bal_reduced[symbols[0]] += dex_trade_amount * 1.01
+                # main_new_arbitrage('sell', symbols[0], symbols[1], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(main_new_arbitrage, 'sell', symbols[0], symbols[1], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
+                continue
+    except func_timeout.exceptions.FunctionTimedOut:
+        print('main_pair_arbitrage time out')
+    except Exception as e:
+        print(e)
 
 def multi_hop_new_arbitrage(dex_side, base_asset, mid_asset, quote_asset, amount_in, output_amount, dexname):
     global total_profit
@@ -402,6 +497,10 @@ def spiex_multi_hop_arbitrage():
             cex_sell_price = base_sell_price / quote_buy_price
             if cex_sell_price > dex_buy_price * (1 + price_percent_difference_threshold):
                 dex_quote_bal = dex_swap.asset_balance(symbols[2])
+                dex_base_bal = dex_swap.asset_balance(symbols[0])
+                if symbols[0] in max_on_chain_balances and max_on_chain_balances[symbols[0]] < dex_base_bal / 10 ** 18:
+                    print('{} dex balance={}, exceed max cap, dex cannot buy it use {}'.format(symbols[0], dex_base_bal / 10 ** 18, symbols[2]))
+                    continue
                 cex_base_bal = binance.get_balance_with_borrow(symbols[0])
                 max_quote_trade_amount = max_usdt_trade_amount / quote_buy_price
                 dex_trade_amount = min(10 ** 18 * max_quote_trade_amount, dex_quote_bal, 10 ** 18 * min(cex_base_bal, base_sell_volume) * cex_sell_price, 10 ** 18 * quote_buy_volume) * 98 / 100  
@@ -423,6 +522,10 @@ def spiex_multi_hop_arbitrage():
                 continue
             elif cex_buy_price < dex_sell_price / (1 + price_percent_difference_threshold):
                 dex_base_bal = dex_swap.asset_balance(symbols[0])
+                dex_quote_bal = dex_swap.asset_balance(symbols[2])
+                if symbols[2] in max_on_chain_balances and max_on_chain_balances[symbols[2]] < dex_quote_bal / 10 ** 18:
+                    print('{} dex balance={}, exceed max cap, dex cannot buy it use {}'.format(symbols[2], dex_quote_bal / 10 ** 18, symbols[0]))
+                    continue
                 cex_quote_bal = binance.get_balance_with_borrow(symbols[2])
                 max_base_trade_amount = max_usdt_trade_amount / base_buy_price
                 dex_trade_amount = min(dex_base_bal, 10 ** 18 * max_base_trade_amount, 10 ** 18 * min(cex_quote_bal, quote_sell_volume) * quote_sell_price / base_buy_price, 10 ** 18 * base_buy_volume) * 98 / 100
@@ -482,6 +585,10 @@ def spooky_multi_hop_arbitrage():
             cex_sell_price = base_sell_price / quote_buy_price
             if cex_sell_price > dex_buy_price * (1 + price_percent_difference_threshold):
                 dex_quote_bal = dex_swap.asset_balance(symbols[2])
+                dex_base_bal = dex_swap.asset_balance(symbols[0])
+                if symbols[0] in max_on_chain_balances and max_on_chain_balances[symbols[0]] < dex_base_bal / 10 ** 18:
+                    print('{} dex balance={}, exceed max cap, dex cannot buy it use {}'.format(symbols[0], dex_base_bal / 10 ** 18, symbols[2]))
+                    continue
                 cex_base_bal = binance.get_balance_with_borrow(symbols[0])
                 max_quote_trade_amount = max_usdt_trade_amount / quote_buy_price
                 dex_trade_amount = min(10 ** 18 * max_quote_trade_amount, dex_quote_bal, 10 ** 18 * min(cex_base_bal, base_sell_volume) * cex_sell_price, 10 ** 18 * quote_buy_volume) * 98 / 100  
@@ -503,6 +610,99 @@ def spooky_multi_hop_arbitrage():
                 continue
             elif cex_buy_price < dex_sell_price / (1 + price_percent_difference_threshold):
                 dex_base_bal = dex_swap.asset_balance(symbols[0])
+                dex_quote_bal = dex_swap.asset_balance(symbols[2])
+                if symbols[2] in max_on_chain_balances and max_on_chain_balances[symbols[2]] < dex_quote_bal / 10 ** 18:
+                    print('{} dex balance={}, exceed max cap, dex cannot buy it use {}'.format(symbols[2], dex_quote_bal / 10 ** 18, symbols[0]))
+                    continue
+                cex_quote_bal = binance.get_balance_with_borrow(symbols[2])
+                max_base_trade_amount = max_usdt_trade_amount / base_buy_price
+                dex_trade_amount = min(dex_base_bal, 10 ** 18 * max_base_trade_amount, 10 ** 18 * min(cex_quote_bal, quote_sell_volume) * quote_sell_price / base_buy_price, 10 ** 18 * base_buy_volume) * 98 / 100
+                price_limit = cex_buy_price * (1 + price_percent_difference_threshold)
+                if dex_trade_amount * base_buy_price / btm_buy_price < 10 ** 18:
+                    continue
+                price, dex_base_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'sell', price_limit, dexname)
+                cex_quote_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_base_trade_amount, symbols[0], symbols[1], symbols[2], dexname) / 10 ** 18
+                cex_base_buy_amount = dex_base_trade_amount / 10 ** 18
+                profit = cex_quote_sell_amount * quote_sell_price * (1 - fee) - cex_base_buy_amount * base_buy_price * (1 + fee)
+                if profit < min_profit:
+                    # print('{} {} trade amount is {:.4f}, profit is {:.4f} USDT, too low!'.format(dexname, s_pair, cex_quote_sell_amount, profit))
+                    continue
+                print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex buy price is {:.4f}, amount is {:.4f}, dex sell price is {:.4f}'.format(dexname, s_pair, profit, cex_buy_price, cex_base_buy_amount, dex_sell_price))
+                binance.bal_reduced[symbols[2]] += cex_quote_sell_amount * 1.01
+                dex_swap.bal_reduced[symbols[0]] += dex_trade_amount * 1.01
+                # multi_hop_new_arbitrage('sell', symbols[0], symbols[1], symbols[2], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(multi_hop_new_arbitrage, 'sell', symbols[0], symbols[1], symbols[2], dex_base_trade_amount, cex_quote_sell_amount * 10 ** 18, dexname)
+                continue
+    except func_timeout.exceptions.FunctionTimedOut:
+        print('main_pair_arbitrage time out')
+    except Exception as e:
+        print(e)
+
+
+def sushi_multi_hop_arbitrage():
+    global btm_buy_price
+    global busd_pair_assets
+    try:
+        dexname = 'SUSHIEX'
+        btm_depth = get_valid_depth(binance.depths, 'FTMUSDT')
+        if btm_depth is None:
+            return
+        btm_buy_price, _, _, _ = get_depth_volume_price(4, btm_depth)
+        for s_pair in dex_swap.sushi_multi_pairs:
+            symbols = s_pair.split("_")
+            base_depth = get_valid_depth(binance.depths, symbols[0]+'USDT')
+            quote_depth = get_valid_depth(binance.depths, symbols[2]+'USDT')
+            if base_depth is None or quote_depth is None:
+                print('{} depth is none'.format(s_pair))
+                continue
+            base_buy_price, base_buy_volume, base_sell_price, base_sell_volume = get_depth_volume_price(4, base_depth)
+            quote_buy_price, quote_buy_volume, quote_sell_price, quote_sell_volume = get_depth_volume_price(4, quote_depth)
+            # 同一个交易对只能有一个线程，防止重复交易
+            l = clear_complete_task(tasks)
+            # 超过10个线程后，会有线程被阻塞，影响实时成交，降低成功率
+            if l > thread_count:
+                print('working task > {}'.format(thread_count))
+                return
+            if s_pair in tasks:
+                continue
+            min_profit = min_profit1
+            base_min_amount = 200 / base_buy_price
+            quote_min_amount = 200 / quote_buy_price
+            dex_buy_price = dex_swap.get_price_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, 'buy', quote_min_amount * 10 ** 18, dexname)
+            dex_sell_price = dex_swap.get_price_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, 'sell', base_min_amount * 10 ** 18, dexname)
+            cex_buy_price = base_buy_price / quote_sell_price
+            cex_sell_price = base_sell_price / quote_buy_price
+            if cex_sell_price > dex_buy_price * (1 + price_percent_difference_threshold):
+                dex_quote_bal = dex_swap.asset_balance(symbols[2])
+                dex_base_bal = dex_swap.asset_balance(symbols[0])
+                if symbols[0] in max_on_chain_balances and max_on_chain_balances[symbols[0]] < dex_base_bal / 10 ** 18:
+                    print('{} dex balance={}, exceed max cap, dex cannot buy it use {}'.format(symbols[0], dex_base_bal / 10 ** 18, symbols[2]))
+                    continue
+                cex_base_bal = binance.get_balance_with_borrow(symbols[0])
+                max_quote_trade_amount = max_usdt_trade_amount / quote_buy_price
+                dex_trade_amount = min(10 ** 18 * max_quote_trade_amount, dex_quote_bal, 10 ** 18 * min(cex_base_bal, base_sell_volume) * cex_sell_price, 10 ** 18 * quote_buy_volume) * 98 / 100  
+                price_limit = (cex_sell_price / (1 + price_percent_difference_threshold))
+                if dex_trade_amount * quote_buy_price / btm_buy_price < 10 ** 18:
+                    continue
+                price, dex_quote_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'buy', price_limit, dexname)
+                cex_base_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_quote_trade_amount, symbols[2], symbols[1], symbols[0], dexname) / 10 ** 18
+                cex_quote_buy_amount = dex_quote_trade_amount / 10 ** 18
+                profit = cex_base_sell_amount * base_sell_price * (1 - fee) - cex_quote_buy_amount * quote_buy_price * (1 + fee)
+                if profit < min_profit:
+                    # print('{} {} trade amount is {:.4f}, profit is {:.4f} USDT, too low!'.format(dexname, s_pair, cex_quote_buy_amount, profit))
+                    continue
+                print('\n', '-'*30, '\n{} {} arbitrage profit is {:.4f}, cex sell price is {:.4f}, amount is {:.4f}, dex buy price is {:.4f}'.format(dexname, s_pair, profit, cex_sell_price, cex_base_sell_amount, price))
+                binance.bal_reduced[symbols[0]] += cex_base_sell_amount * 1.01
+                dex_swap.bal_reduced[symbols[2]] += dex_trade_amount * 1.01
+                # multi_hop_new_arbitrage('buy', symbols[0], symbols[1], symbols[2], dex_quote_trade_amount, cex_base_sell_amount * 10 ** 18, dexname)
+                tasks[s_pair] = threadpool.submit(multi_hop_new_arbitrage, 'buy', symbols[0], symbols[1], symbols[2], dex_quote_trade_amount, cex_base_sell_amount * 10 ** 18, dexname)
+                continue
+            elif cex_buy_price < dex_sell_price / (1 + price_percent_difference_threshold):
+                dex_base_bal = dex_swap.asset_balance(symbols[0])
+                dex_quote_bal = dex_swap.asset_balance(symbols[2])
+                if symbols[2] in max_on_chain_balances and max_on_chain_balances[symbols[2]] < dex_quote_bal / 10 ** 18:
+                    print('{} dex balance={}, exceed max cap, dex cannot buy it use {}'.format(symbols[2], dex_quote_bal / 10 ** 18, symbols[0]))
+                    continue
                 cex_quote_bal = binance.get_balance_with_borrow(symbols[2])
                 max_base_trade_amount = max_usdt_trade_amount / base_buy_price
                 dex_trade_amount = min(dex_base_bal, 10 ** 18 * max_base_trade_amount, 10 ** 18 * min(cex_quote_bal, quote_sell_volume) * quote_sell_price / base_buy_price, 10 ** 18 * base_buy_volume) * 98 / 100
@@ -532,8 +732,108 @@ def set_working_flag(status: str):
     with open(file_path, 'w') as f:
         f.write(status)
 
+def wait_for_withdraw_complete(wid):
+    while(True):
+        try:
+            print('\nwait for FTM withdraw to dex complete, pending id:\n')
+            print(wid)
+            withdraw_list = binance.client.get_withdraw_history(status=2)
+            withdraw_list += binance.client.get_withdraw_history(status=4)
+            withdraw_list += binance.client.get_withdraw_history(status=6)
+            find_item = False
+            for item in withdraw_list:
+                if item['id'] != wid:
+                    continue
+                find_item = True
+                if 'txId' not in item:
+                    continue
+                txid = item['txId']
+                tx = chain.get_transaction(txid)
+                while(tx==None or tx.status==None or tx.status < 0):
+                    print('withdraw tx status is {}'.format(tx.status))
+                    time.sleep(0.3)
+                if tx.status == 1:
+                    print('{} withdraw succeed, amount={}, txid={}'.format(item['coin'], item['amount'], txid))
+                    return
+                else:
+                    print('txid={} status={}'.format(txid, tx.status))
+                break
+            if not find_item:
+                print('Cannot find FTM withdraw ID!')
+   
+            withdraw_list = binance.client.get_withdraw_history(status=3)
+            withdraw_list += binance.client.get_withdraw_history(status=5)
+            print('get completed withdraw history')
+            for item in withdraw_list:
+                if item['id'] == wid:
+                    print('FTM withdraw complete')
+                    return
+        except Exception as e:
+            print('wait_for_withdraw_complete exception')
+            log.logger.info('wait_for_withdraw_complete exception: {}'.format(str(e)))
+        finally:
+            time.sleep(3)
+
+
+def wait_for_deposit_complete(txid):
+    while(True):
+        try:
+            print('\nwait for FTM deposit to cex complete, pending txid:\n')
+            print(txid)
+            deposit_list = binance.client.get_deposit_history(status=1)
+            for item in deposit_list:
+                if item['txId'] == txid:
+                    print('{} deposit succeed, amount is {}'.format(item['coin'], item['amount']))
+                    return
+        finally:
+            time.sleep(3)
+
+def check_ftm_balance():
+    while(True):
+        try:
+            spot_ftm_bal = binance.spot_get_balance('FTM')
+            if spot_ftm_bal > 100:
+                print('FTM transfer_spot_to_margin')
+                binance.client.transfer_spot_to_margin(
+                        asset='FTM',
+                        amount=spot_ftm_bal)
+            dex_ftm_bal = dex_swap.asset_balance('FTM') / 10 ** 18
+            withdraw_amount = 400000
+            if dex_ftm_bal < 20000:
+                print('FTM withdraw to dex wallet')
+                binance.client.transfer_margin_to_spot(
+                        asset='FTM',
+                        amount=withdraw_amount)
+                time.sleep(1)
+                resp = binance.client.withdraw(
+                    coin='FTM',
+                    address='0x9D945d909Ca91937d19563e30bB4DAc12C860189',
+                    amount=withdraw_amount,
+                    network='FTM')
+                wait_for_withdraw_complete(resp['id'])
+            
+            margin_ftm_bal = binance.margin_get_balance('FTM')
+            if margin_ftm_bal < 20000:
+                print('FTM deposit to cex')
+                txid = dex_swap.transfer_ftm(300000 * 10 ** 18)
+                if txid is None:
+                    time.sleep(3)
+                    continue
+                wait_for_deposit_complete(txid)
+        except func_timeout.exceptions.FunctionTimedOut:
+            print('check_ftm_balance time out')
+        except Exception as e:
+            print(e)
+        finally:
+            time.sleep(3)
+
 def main():
     binance.start_update_depth()
+    binance.margin_get_balances()
+    binance.spot_get_balances()
+    dex_swap.update_information()
+    t = threading.Thread(target=check_ftm_balance)
+    t.start()
     while True:
         try:
             dex_swap.check_status()
@@ -545,6 +845,9 @@ def main():
 
             spiex_pair_arbitrage()
             spiex_multi_hop_arbitrage()
+
+            sushi_pair_arbitrage()
+            sushi_multi_hop_arbitrage()
 
             spooky_pair_arbitrage()
             spooky_multi_hop_arbitrage()
@@ -559,7 +862,7 @@ def main():
         except Exception as e:
             print(e)
         finally:
-            time.sleep(0.3)
+            time.sleep(0.5)
 
 if __name__ == '__main__':
     main()
