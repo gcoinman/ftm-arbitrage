@@ -27,7 +27,7 @@ lock = threading.Lock()
 class DexSwap(object):
     def __init__(self, _log, login=True):
         self.gas_price = 40000000000
-        self.max_gas_price = 200000000000
+        self.max_gas_price = 700000000000
 
         self.init(login)
         self.log = _log
@@ -47,7 +47,7 @@ class DexSwap(object):
         self.w3 = Web3(Web3.WebsocketProvider('wss://wsapi.fantom.network'))
 
     def init(self, login):
-        self.netid='ftm3'
+        self.netid='ftm1'
         network.connect(self.netid)
         network.gas_price(self.gas_price)
         network.gas_limit(2100000)

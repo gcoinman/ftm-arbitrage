@@ -788,6 +788,25 @@ def wait_for_deposit_complete(txid):
         finally:
             time.sleep(3)
 
+def get_asset_info(**params):
+    return binance.client._request_margin_api('get', 'capital/config/getall', True, data=params)
+
+def is_withdraw_enable(assets_info):
+    for asset_info in assets_info:
+        if asset_info['coin'].upper() == 'FTM':
+            for network in asset_info['networkList']:
+                if network['name'] == 'FTM':
+                    return network['withdrawEnable']
+    return False
+
+def is_deposit_enable(assets_info):
+    for asset_info in assets_info:
+        if asset_info['coin'].upper() == 'FTM':
+            for network in asset_info['networkList']:
+                if network['name'] == 'FTM':
+                    return network['depositEnable']
+    return False
+
 def check_ftm_balance():
     while(True):
         try:
@@ -797,9 +816,10 @@ def check_ftm_balance():
                 binance.client.transfer_spot_to_margin(
                         asset='FTM',
                         amount=spot_ftm_bal)
+            assets_info = get_asset_info(timestamp = int(time.time() * 1000))
             dex_ftm_bal = dex_swap.asset_balance('FTM') / 10 ** 18
             withdraw_amount = 400000
-            if dex_ftm_bal < 20000:
+            if dex_ftm_bal < 20000 and is_withdraw_enable(assets_info):
                 print('FTM withdraw to dex wallet')
                 binance.client.transfer_margin_to_spot(
                         asset='FTM',
@@ -813,7 +833,7 @@ def check_ftm_balance():
                 wait_for_withdraw_complete(resp['id'])
             
             margin_ftm_bal = binance.margin_get_balance('FTM')
-            if margin_ftm_bal < 20000:
+            if margin_ftm_bal < 20000 and is_deposit_enable(assets_info):
                 print('FTM deposit to cex')
                 txid = dex_swap.transfer_ftm(300000 * 10 ** 18)
                 if txid is None:
@@ -825,7 +845,7 @@ def check_ftm_balance():
         except Exception as e:
             print(e)
         finally:
-            time.sleep(3)
+            time.sleep(10)
 
 def main():
     binance.start_update_depth()
