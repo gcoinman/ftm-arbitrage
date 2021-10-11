@@ -26,8 +26,9 @@ lock = threading.Lock()
 
 class DexSwap(object):
     def __init__(self, _log, login=True):
-        self.gas_price = 40000000000
-        self.max_gas_price = 700000000000
+        self.init_gas_price = 1000000000000
+        self.gas_price = 1500000000000
+        self.max_gas_price = 4000000000000
 
         self.init(login)
         self.log = _log
@@ -41,16 +42,22 @@ class DexSwap(object):
         self.last_update_reward = 0
         self.last_order_time = int(time.time())
         self.broadcast_finish = True
-        self.multi_pairs = self.find_multi_paths()
-        self.spooky_multi_pairs = self.spooky_find_multi_paths()
-        self.sushi_multi_pairs = self.sushi_find_multi_paths()
-        self.w3 = Web3(Web3.WebsocketProvider('wss://wsapi.fantom.network'))
+        self.spiex_multi_pairs = self.find_multi_paths('SPIEX')
+        self.spooky_multi_pairs = self.find_multi_paths('SPKY')
+        self.sushi_multi_pairs = self.find_multi_paths('SUSHIEX')
+        # self.w3 = Web3(Web3.WebsocketProvider('wss://wsapi.fantom.network'))
+        # self.w3 = Web3(Web3.HTTPProvider('https://rpc.neist.io'))
+        # self.w3 = Web3(Web3.HTTPProvider('https://nameless-white-cloud.fantom.quiknode.pro/e4fca9b59eee4c6ea1a7cc0fdc5c2b21171bf35a/'))
+        self.w3 = Web3(Web3.WebsocketProvider('wss://nameless-white-cloud.fantom.quiknode.pro/e4fca9b59eee4c6ea1a7cc0fdc5c2b21171bf35a/'))
 
     def init(self, login):
-        self.netid='ftm1'
+        # self.netid='ftm_neist'
+        self.netid='quicknode'
+        # self.netid='ftm2'
         network.connect(self.netid)
         network.gas_price(self.gas_price)
         network.gas_limit(2100000)
+        accounts.clear()
         if login:
             print('Enter controller password:')
             accounts.load('arbitrage.json')
@@ -86,6 +93,63 @@ class DexSwap(object):
                 precisions[asset] = 18
         return precisions
 
+
+    def find_multi_paths(self, dexname):
+        all_pairs = []
+        if dexname == 'SPIEX':
+            all_pairs = spirit_all_pairs
+        elif dexname == 'SPKY':
+            all_pairs = spooky_pairs
+        elif dexname == 'SUSHIEX':
+            all_pairs = sushi_pairs
+
+        all_pairs = [pair.replace(dexname, '') for pair in all_pairs]
+        multi_pairs = []
+        nl = len(all_pairs)
+        while(nl > 1):
+            first_pair = all_pairs[0]
+            all_pairs = all_pairs[1:]
+            nl = len(all_pairs)
+            first_pair_symbols = first_pair.split('_')
+            symbol0 = ''
+            symbol1 = ''
+            for pair in all_pairs:
+                symbols = pair.split('_')
+                m_pair = ''
+                if first_pair_symbols[0] == symbols[0]:
+                    m_pair = first_pair_symbols[1] + '_' + symbols[0] + '_' + symbols[1]
+                    m_pair_r = symbols[1] + '_' + symbols[0] + '_' + first_pair_symbols[1]
+                    symbol0 = first_pair_symbols[1]
+                    symbol1 = symbols[1]
+                    if symbols[1] == 'FTM':
+                        m_pair, m_pair_r = m_pair_r, m_pair
+                elif first_pair_symbols[0] == symbols[1]:
+                    m_pair = first_pair_symbols[1] + '_' + symbols[1] + '_' + symbols[0]
+                    m_pair_r = symbols[0] + '_' + symbols[1] + '_' + first_pair_symbols[1]
+                    symbol0 = first_pair_symbols[1]
+                    symbol1 = symbols[0]
+                    if symbols[0] == 'FTM':
+                        m_pair, m_pair_r = m_pair_r, m_pair
+                elif first_pair_symbols[1] == symbols[0]:
+                    m_pair = first_pair_symbols[0] + '_' + symbols[0] + '_' + symbols[1]
+                    m_pair_r = symbols[1] + '_' + symbols[0] + '_' + first_pair_symbols[0]
+                    symbol0 = first_pair_symbols[0]
+                    symbol1 = symbols[1]
+                    if symbols[1] == 'FTM':
+                        m_pair, m_pair_r = m_pair_r, m_pair
+                elif first_pair_symbols[1] == symbols[1]:
+                    m_pair = first_pair_symbols[0] + '_' + symbols[1] + '_' + symbols[0]
+                    m_pair_r = symbols[0] + '_' + symbols[1] + '_' + first_pair_symbols[0]
+                    symbol0 = first_pair_symbols[0]
+                    symbol1 = symbols[0]
+                    if symbols[0] == 'FTM':
+                        m_pair, m_pair_r = m_pair_r, m_pair
+                if symbol0 not in assets or symbol1 not in assets or m_pair == '':
+                    continue
+                if m_pair not in multi_pairs and m_pair_r not in multi_pairs:
+                    multi_pairs.append(m_pair)
+        return multi_pairs
+
     def set_low_gas_price(self):
         network.gas_price(2010000000)
         self.gas_price = 10000000000
@@ -103,69 +167,13 @@ class DexSwap(object):
     def get_borrow_balance(self, asset):
         return 0
 
-    def update_information(self):
-        asset_addrs = [eval(asset) for asset in assets[1:]]
-        pairs = [eval(pair+'SPIEX') for pair in spirit_pairs]
-        pairs += [eval(pair) for pair in spooky_pairs]
-        pairs += [eval(pair) for pair in sushi_pairs]
-        (reserves, balances) = self.query.get_all_information(self.acct, asset_addrs, pairs)
-        for i in range(len(assets)):
-            asset = assets[i]
-            free_balance = balances[i]
-            free_balance = free_balance * 10 ** (18 - self.precisions[asset])
-            self.balances[assets[i]] = free_balance
-
-        i = 0
-        for pair in spirit_pairs:
-            symbols = pair.split("_")
-            if symbols[0] == 'FTM':
-                base_address = WFTM
-            else:
-                base_address = eval(symbols[0])
-            if symbols[1] == 'FTM':
-                quote_address = WFTM
-            else:
-                quote_address = eval(symbols[1])
-            self.reserves[pair+'SPIEX'] = (reserves[i][0], reserves[i][1]) if int(base_address, 16) < int(quote_address, 16) else (reserves[i][1], reserves[i][0])
-            i += 1
-
-        for pair in spooky_pairs:
-            pair = pair.replace('SPKY', '')
-            symbols = pair.split("_")
-            if symbols[0] == 'FTM':
-                base_address = WFTM
-            else:
-                base_address = eval(symbols[0])
-            if symbols[1] == 'FTM':
-                quote_address = WFTM
-            else:
-                quote_address = eval(symbols[1])
-            self.reserves[pair+'SPKY'] = (reserves[i][0], reserves[i][1]) if int(base_address, 16) < int(quote_address, 16) else (reserves[i][1], reserves[i][0])
-            i += 1
-
-        for pair in sushi_pairs:
-            pair = pair.replace('SUSHIEX', '')
-            symbols = pair.split("_")
-            if symbols[0] == 'FTM':
-                base_address = WFTM
-            else:
-                base_address = eval(symbols[0])
-            if symbols[1] == 'FTM':
-                quote_address = WFTM
-            else:
-                quote_address = eval(symbols[1])
-            self.reserves[pair+'SUSHIEX'] = (reserves[i][0], reserves[i][1]) if int(base_address, 16) < int(quote_address, 16) else (reserves[i][1], reserves[i][0])
-            i += 1
-
-
+    # @func_set_timeout(3)
     # def update_information(self):
-    #     abi = json.loads(query_abi)
-    #     query = self.w3.eth.contract('0x7CAE4F73eAFc482efA0d02205C6e6E71c3cdcEEd', abi=abi)
     #     asset_addrs = [eval(asset) for asset in assets[1:]]
-    #     pairs = [eval(pair+'SPIEX') for pair in spirit_pairs]
+    #     pairs = [eval(pair+'SPIEX') for pair in spirit_all_pairs]
     #     pairs += [eval(pair) for pair in spooky_pairs]
     #     pairs += [eval(pair) for pair in sushi_pairs]
-    #     (reserves, balances) = query.functions.get_all_information('0x9D945d909Ca91937d19563e30bB4DAc12C860189', asset_addrs, pairs).call()
+    #     (reserves, balances) = self.query.get_all_information(self.acct, asset_addrs, pairs)
     #     for i in range(len(assets)):
     #         asset = assets[i]
     #         free_balance = balances[i]
@@ -173,7 +181,7 @@ class DexSwap(object):
     #         self.balances[assets[i]] = free_balance
 
     #     i = 0
-    #     for pair in spirit_pairs:
+    #     for pair in spirit_all_pairs:
     #         symbols = pair.split("_")
     #         if symbols[0] == 'FTM':
     #             base_address = WFTM
@@ -214,6 +222,63 @@ class DexSwap(object):
     #         self.reserves[pair+'SUSHIEX'] = (reserves[i][0], reserves[i][1]) if int(base_address, 16) < int(quote_address, 16) else (reserves[i][1], reserves[i][0])
     #         i += 1
 
+    @func_set_timeout(3)
+    def update_information(self):
+        abi = json.loads(query_abi)
+        query = self.w3.eth.contract('0x7CAE4F73eAFc482efA0d02205C6e6E71c3cdcEEd', abi=abi)
+        asset_addrs = [eval(asset) for asset in assets[1:]]
+        pairs = [eval(pair+'SPIEX') for pair in spirit_all_pairs]
+        pairs += [eval(pair) for pair in spooky_pairs]
+        pairs += [eval(pair) for pair in sushi_pairs]
+        (reserves, balances) = query.functions.get_all_information('0x9D945d909Ca91937d19563e30bB4DAc12C860189', asset_addrs, pairs).call()
+        for i in range(len(assets)):
+            asset = assets[i]
+            free_balance = balances[i]
+            free_balance = free_balance * 10 ** (18 - self.precisions[asset])
+            self.balances[assets[i]] = free_balance
+
+        i = 0
+        for pair in spirit_all_pairs:
+            symbols = pair.split("_")
+            if symbols[0] == 'FTM':
+                base_address = WFTM
+            else:
+                base_address = eval(symbols[0])
+            if symbols[1] == 'FTM':
+                quote_address = WFTM
+            else:
+                quote_address = eval(symbols[1])
+            self.reserves[pair+'SPIEX'] = (reserves[i][0], reserves[i][1]) if int(base_address, 16) < int(quote_address, 16) else (reserves[i][1], reserves[i][0])
+            i += 1
+
+        for pair in spooky_pairs:
+            pair = pair.replace('SPKY', '')
+            symbols = pair.split("_")
+            if symbols[0] == 'FTM':
+                base_address = WFTM
+            else:
+                base_address = eval(symbols[0])
+            if symbols[1] == 'FTM':
+                quote_address = WFTM
+            else:
+                quote_address = eval(symbols[1])
+            self.reserves[pair+'SPKY'] = (reserves[i][0], reserves[i][1]) if int(base_address, 16) < int(quote_address, 16) else (reserves[i][1], reserves[i][0])
+            i += 1
+
+        for pair in sushi_pairs:
+            pair = pair.replace('SUSHIEX', '')
+            symbols = pair.split("_")
+            if symbols[0] == 'FTM':
+                base_address = WFTM
+            else:
+                base_address = eval(symbols[0])
+            if symbols[1] == 'FTM':
+                quote_address = WFTM
+            else:
+                quote_address = eval(symbols[1])
+            self.reserves[pair+'SUSHIEX'] = (reserves[i][0], reserves[i][1]) if int(base_address, 16) < int(quote_address, 16) else (reserves[i][1], reserves[i][0])
+            i += 1
+
     def get_reserve(self, base_asset, quote_asset):
         return self.reserves[base_asset + '_' + quote_asset]
 
@@ -239,14 +304,18 @@ class DexSwap(object):
     def _timestamp(self):
         return int(time.time())
 
+    def reset_gas_price(self):
+        if self.gas_price > self.init_gas_price:
+            self.gas_price = self.init_gas_price
+            network.gas_price(self.gas_price)
 
-    @func_set_timeout(28)
+    @func_set_timeout(80)
     def transfer(self, to, amount, call_data):
         tx = self.acct.transfer(to, amount, data=call_data, required_confs=0)
         print('transfer send succeed')
         return tx
 
-    @func_set_timeout(28)
+    @func_set_timeout(80)
     def wait(self, tx):
         tx.wait(1)
 
@@ -285,14 +354,14 @@ class DexSwap(object):
             eth_amount = 0
             if quote_asset == 'FTM':
                 path = [eval(base_asset), WFTM]
-                calldata = router.swapExactTokensForETH.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 12)
+                calldata = router.swapExactTokensForETH.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 60)
             elif base_asset == 'FTM':
                 path = [WFTM, eval(quote_asset)]
-                calldata = router.swapExactETHForTokens.encode_input(amount_out, path, self.acct, self._timestamp() + 12)
+                calldata = router.swapExactETHForTokens.encode_input(amount_out, path, self.acct, self._timestamp() + 60)
                 eth_amount = amount_in
             else:
                 path = [eval(base_asset), eval(quote_asset)]
-                calldata = router.swapExactTokensForTokens.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 12)
+                calldata = router.swapExactTokensForTokens.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 60)
             with lock:
                 if not self.broadcast_finish:
                     raise Exception('current has timeout transaction')
@@ -324,6 +393,7 @@ class DexSwap(object):
             self.log.logger.info('{} dex sell {}: amount_in={:.4f}, amount_out={:.4f}'.format(dexname, base_asset, org_amount_in / 10 ** 18, amount_out))
             succeed = True
             self.last_order_time = int(time.time())
+            self.reset_gas_price()
         except Exception as e:
             # traceback.print_exc()
             self.log.logger.info('dex sell fail: {}'.format(str(e)))
@@ -378,15 +448,15 @@ class DexSwap(object):
             amount_out = int(amount_out * slippage_numerator / slippage_senominator)
             if quote_asset == 'FTM':
                 path = [WFTM, eval(base_asset)]
-                calldata = router.swapExactETHForTokens.encode_input(amount_out, path, self.acct, self._timestamp() + 12)
+                calldata = router.swapExactETHForTokens.encode_input(amount_out, path, self.acct, self._timestamp() + 60)
                 eth_amount = amount_in
             elif base_asset == 'FTM':
                 path = [eval(quote_asset), WFTM]
-                calldata = router.swapExactTokensForETH.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 12)
+                calldata = router.swapExactTokensForETH.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 60)
                 eth_amount = 0
             else:
                 path = [eval(quote_asset), eval(base_asset)]
-                calldata = router.swapExactTokensForTokens.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 12)
+                calldata = router.swapExactTokensForTokens.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 60)
                 eth_amount = 0
             with lock:
                 if not self.broadcast_finish:
@@ -421,6 +491,7 @@ class DexSwap(object):
             self.log.logger.info('{} dex buy {}: amount_in={:.4f}, amount_out={:.4f}'.format(dexname, base_asset, amount_in / 10 ** 18, amount_out))
             succeed = True
             self.last_order_time = int(time.time())
+            self.reset_gas_price()
         except Exception as e:
             # traceback.print_exc()
             self.log.logger.info('dex buy fail: {}'.format(str(e)))
@@ -550,8 +621,18 @@ class DexSwap(object):
             org_amount_out = amount_out
             amount_out = int(amount_out * slippage_numerator / slippage_senominator)
             eth_amount = 0
-            path = [eval(base_asset), WFTM, eval(quote_asset)]
-            calldata = router.swapExactTokensForTokens.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 12)
+            if quote_asset == 'FTM':
+                path = [eval(base_asset), eval(mid_asset), WFTM]
+                calldata = router.swapExactTokensForETH.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 60)
+            elif base_asset == 'FTM':
+                path = [WFTM, eval(mid_asset), eval(quote_asset)]
+                calldata = router.swapExactETHForTokens.encode_input(amount_out, path, self.acct, self._timestamp() + 60)
+                eth_amount = amount_in
+            else:
+                if mid_asset == 'FTM':
+                    mid_asset = 'WFTM'
+                path = [eval(base_asset), eval(mid_asset), eval(quote_asset)]
+                calldata = router.swapExactTokensForTokens.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 60)
             with lock:
                 if not self.broadcast_finish:
                     raise Exception('current has timeout transaction')
@@ -583,6 +664,7 @@ class DexSwap(object):
             self.log.logger.info('{} dex sell {}: amount_in={:.4f}, amount_out={:.4f}'.format(dexname, base_asset, org_amount_in / 10 ** 18, amount_out))
             succeed = True
             self.last_order_time = int(time.time())
+            self.reset_gas_price()
         except Exception as e:
             # traceback.print_exc()
             self.log.logger.info('dex sell {} fail: {}'.format(base_asset + '_' + mid_asset + '_' + quote_asset, str(e)))
@@ -637,9 +719,21 @@ class DexSwap(object):
                 raise Exception('current amout_out is {:.4f}, min_amount_out is {:.4f}'.format(amount_out / 10 ** (self.precisions[base_asset]), min_amount_out / 10 ** 18))
             org_amount_out = amount_out
             amount_out = int(amount_out * slippage_numerator / slippage_senominator)
-            path = [eval(quote_asset), WFTM, eval(base_asset)]
-            calldata = router.swapExactTokensForTokens.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 12)
             eth_amount = 0
+            if quote_asset == 'FTM':
+                path = [WFTM, eval(mid_asset), eval(base_asset)]
+                calldata = router.swapExactETHForTokens.encode_input(amount_out, path, self.acct, self._timestamp() + 60)
+                eth_amount = amount_in
+            elif base_asset == 'FTM':
+                path = [eval(quote_asset), eval(mid_asset), WFTM]
+                calldata = router.swapExactTokensForETH.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 60)
+                eth_amount = 0
+            else:
+                if mid_asset == 'FTM':
+                    mid_asset = 'WFTM'
+                path = [eval(quote_asset), eval(mid_asset), eval(base_asset)]
+                calldata = router.swapExactTokensForTokens.encode_input(amount_in, amount_out, path, self.acct, self._timestamp() + 60)
+                eth_amount = 0
             with lock:
                 if not self.broadcast_finish:
                     raise Exception('current has timeout transaction')
@@ -673,6 +767,7 @@ class DexSwap(object):
             self.log.logger.info('{} dex buy {}: amount_in={:.4f}, amount_out={:.4f}'.format(dexname, base_asset, amount_in / 10 ** 18, amount_out))
             succeed = True
             self.last_order_time = int(time.time())
+            self.reset_gas_price()
         except Exception as e:
             # traceback.print_exc()
             self.log.logger.info('dex buy {} fail: {}'.format(base_asset + '_' + mid_asset + '_' + quote_asset, str(e)))
@@ -694,50 +789,6 @@ class DexSwap(object):
             self.reconnect()
         finally:
             return succeed, amount_out, gasfee
-
-    def find_multi_paths(self):
-        all_pairs = spirit_pairs
-        multi_pairs = []
-        nl = len(all_pairs)
-        while(nl > 1):
-            first_pair = all_pairs[0]
-            all_pairs = all_pairs[1:]
-            for pair in all_pairs:
-                symbols = pair.split('_')
-                m_pair = first_pair + '_' + symbols[0]
-                multi_pairs.append(m_pair)
-            nl = len(all_pairs)
-        return multi_pairs
-
-    def spooky_find_multi_paths(self):
-        all_pairs = spooky_pairs
-        multi_pairs = []
-        nl = len(all_pairs)
-        while(nl > 1):
-            first_pair = all_pairs[0]
-            all_pairs = all_pairs[1:]
-            for pair in all_pairs:
-                symbols = pair.split('_')
-                m_pair = first_pair + '_' + symbols[0]
-                multi_pairs.append(m_pair)
-            nl = len(all_pairs)
-        return multi_pairs
-
-    def sushi_find_multi_paths(self):
-        all_pairs = sushi_pairs
-        multi_pairs = []
-        nl = len(all_pairs)
-        while(nl > 1):
-            first_pair = all_pairs[0]
-            all_pairs = all_pairs[1:]
-            for pair in all_pairs:
-                symbols = pair.split('_')
-                if 'FTM' not in first_pair or symbols[1] != 'FTM':
-                    break
-                m_pair = first_pair + '_' + symbols[0]
-                multi_pairs.append(m_pair)
-            nl = len(all_pairs)
-        return multi_pairs
 
     def extGetOutputAmountMultiHop(self, amountIn, tokenIn, tokenMid, tokenOut, dex_name):
         asset_in = tokenIn.replace(dex_name, '')
@@ -920,23 +971,25 @@ class DexSwap(object):
             self.last_order_time = now
             call_admin()
 
+    def get_scream_balance(self):
+        abi = json.loads(sc_token_abi)
+        FTM = '0x5AA53f03197E08C4851CAD8C92c7922DA5857E5d'
+        USDC = '0xe45ac34e528907d0a0239ab5db507688070b20bf'
+        DAI = '0x8D9AED9882b4953a0c9fa920168fa1FDfA0eBE75'
+        BTC = '0x4565dc3ef685e4775cdf920129111ddf43b9d882'
+        ETH = '0xc772ba6c2c28859b7a0542faa162a56115ddce25'
+        USDT = '0x02224765bc8d54c21bb51b0951c80315e1c263f9'
+        tokens = ['FTM', 'USDC', 'DAI', 'BTC', 'ETH', 'USDT']
+        balances = {}
+        for token in tokens:
+            c_token = Contract.from_abi("CToken", eval(token), abi)
+            underlying = c_token.balanceOfUnderlying.call(self.acct, {'from': dex_swap.acct})
+            borrowed = c_token.borrowBalanceStored(self.acct)
+            balances[token] = (underlying - borrowed) / 10 ** self.precisions[token]
+        return balances
+        
+
 if __name__ == "__main__":
     log = Logger('all.log',level='debug')
     dex_swap = DexSwap(log)
-    dex_swap.spooky_get_pairs()
-    # print(dex_swap.multi_pairs)
-    # print(dex_swap.spooky_multi_pairs)
-    # dex_swap.sushi_get_pairs()
-    # dex_swap.approve_spiex_router('BNB')
-    # dex_swap.find_multi_paths()
-    # print(dex_swap.spooky_multi_pairs)
-    # dex_swap.spiex_get_pairs()
-    # dex_swap.spooky_get_pairs()
-    # dex_swap.check_allowance()
-    # for pair in sushi_pairs:
-    #     symbols = pair.split('_')
-    #     print(symbols[0])
-    #     dex_swap.approve_sushi_router(symbols[0])
-    #     quote = symbols[1].replace('SUSHIEX', '')
-    #     if quote != 'FTM':
-    #         dex_swap.approve_sushi_router(quote)
+    dex_swap.update_information()

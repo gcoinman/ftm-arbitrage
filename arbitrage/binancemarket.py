@@ -26,11 +26,13 @@ from arbitrage.logger import Logger
 from Crypto.Cipher import AES
 from binascii import b2a_hex, a2b_hex
 import getpass
+from decimal import *
 
-def round_down(n, decimals=0):
-    multiplier = 10 ** decimals
-    return math.floor(n * multiplier) / multiplier
-
+def round_down(n, precision=0):
+    if precision > 0.99999:
+        precision = int(precision)
+    return float(Decimal(str(n)).quantize(Decimal(str(precision))))
+    
 class BinanceMarket(object):
     def __init__(self, _log):
         super().__init__()
@@ -40,11 +42,13 @@ class BinanceMarket(object):
         self.markets = [asset + 'USDT' for asset in assets if asset != 'USDT' and asset != 'DAI']
         self.markets += ['USDTDAI']
         self.depths = {}
-        self.update_spot_balances = True
-        self.update_margin_balances = True
         self.init_borrow_limit()
         self.bal_reduced = {}
         self.reset_bal_reduce()
+        self.last_spot_balance_update_time = 0
+        self.last_margin_balance_update_time = 0
+        self.spot_balances = {}
+        self.margin_balances = {}
 
     def init_borrow_limit(self):
         self.borrow_limits = {}
@@ -56,10 +60,9 @@ class BinanceMarket(object):
             self.last_reset_update_times[asset] = 0
 
     def reset_bal_reduce(self):
-        self.update_spot_balances = True
-        self.update_margin_balances = True
         for asset in assets:
             self.bal_reduced[asset] = 0
+        self.bal_reduced['FTM'] = 20000
 
     def get_precision(self):
         precisions = {}
@@ -70,20 +73,16 @@ class BinanceMarket(object):
             pair = asset+'USDT'
             for info in exinfo["symbols"]:
                 if pair == info['symbol']:
-                    ticksize = info["filters"][0]['tickSize']
-                    price_precision = abs(round(math.log(float(ticksize), 10)))
-                    minqty = info["filters"][2]['minQty']
-                    qty_precision = abs(round(math.log(float(minqty), 10)))
-                    precisions[pair] = [price_precision, qty_precision]
+                    ticksize = float(info["filters"][0]['tickSize'])
+                    minqty = float(info["filters"][2]['minQty'])
+                    precisions[pair] = [ticksize, minqty]
         return precisions
 
 
     def create_client(self):
-        public = 'Jw3uUtZjmoye0Fs01lyTY9QxO59RmSN200KAZGxLEXMFDSAaXZDM4TtOs5Ewuxey'
-        secret = 'AaXfunWRnJTPKqeWHuDf4E5QvbVFCN7YuQocd0nANRqEvl5rRPQxhO1NJNhP1mmE'
-        # public = 's6KWk4UBIRtqkNTh4bPxd5xEgUBsun6yCYkrx1knF5z1iiUtMu5KBr2fAAJycmg3'
-        # secret = 'V1FzFgRLEmw5pTT1cduY0iIgVFcMiGrHdVqHVW4xTFtL0KQ6XBSFvMRsJEnWv3FP'
-        self.client = Client(public, secret)
+        self.public = 'Jw3uUtZjmoye0Fs01lyTY9QxO59RmSN200KAZGxLEXMFDSAaXZDM4TtOs5Ewuxey'
+        self.secret = 'AaXfunWRnJTPKqeWHuDf4E5QvbVFCN7YuQocd0nANRqEvl5rRPQxhO1NJNhP1mmE'
+        self.client = Client(self.public, self.secret)
 
     def margin_get_borrow_limit(self, asset):
         current_reset_update_time = time.time()
@@ -141,9 +140,7 @@ class BinanceMarket(object):
             if order is None or "clientOrderId" not in order:
                 self.log.logger.info('margin {}: order is none buy clientOrderId not in order'.format(buy_action))
                 time.sleep(2)
-                self.margin_get_balances()
                 return self.margin_buy(asset, amount, price)
-            self.update_margin_balances = True
             self.log.logger.info('cex {} succeed'.format(buy_action))
 
     def margin_sell(self, asset, amount, price):
@@ -182,9 +179,7 @@ class BinanceMarket(object):
             if order is None or "clientOrderId" not in order:
                 self.log.logger.info('margin {}: order is none or sell clientOrderId not in order'.format(sell_action))
                 time.sleep(2)
-                self.margin_get_balances()
                 return self.margin_sell(asset, amount, price)
-            self.update_margin_balances = True
             self.log.logger.info('cex {} succeed'.format(sell_action))
 
     def _timestamp(self):
@@ -192,41 +187,42 @@ class BinanceMarket(object):
 
     def margin_get_balances(self):
         response = self.client.get_margin_account()
-        self.margin_balances = response['userAssets']
+        margin_balances_info = response['userAssets']
+        for asset_info in margin_balances_info:
+            self.margin_balances[asset_info['asset']] = float(asset_info['free'])
 
     def margin_get_balance_with_borrow(self, asset):
-        if self.update_margin_balances:
+        current_reset_update_time = time.time()
+        if current_reset_update_time - self.last_margin_balance_update_time > 20:
             self.margin_get_balances()
-            self.update_margin_balances = False
-        free_bal = self.margin_get_balance(asset)
+            self.last_margin_balance_update_time = current_reset_update_time
         borrow_limit = self.margin_get_borrow_limit(asset)
         reduce = 0
         if asset in self.bal_reduced:
             reduce = self.bal_reduced[asset]
-        return (free_bal + borrow_limit) * 0.95 - reduce
+        return (self.margin_balances[asset] + borrow_limit) * 0.95 - reduce
 
     def margin_get_balance(self, asset):
-        for asset_info in self.margin_balances:
-            if asset_info['asset'] == asset.upper():
-                free_bal = float(asset_info['free'])
-                return free_bal
+        if asset in self.margin_balances:
+            return self.margin_balances[asset]
         return 0
 
     def spot_get_balances(self):
         response = self.client.get_account()
-        self.spot_balances = response['balances']
+        spot_balances_info = response['balances']
+        for asset_info in spot_balances_info:
+            self.spot_balances[asset_info['asset']] = float(asset_info['free'])
 
     def spot_get_balance(self, asset):
-        if self.update_spot_balances:
+        current_reset_update_time = time.time()
+        if current_reset_update_time - self.last_spot_balance_update_time > 20:
             self.spot_get_balances()
-            self.update_spot_balances = False
-        for asset_info in self.spot_balances:
-            if asset_info['asset'] == asset.upper():
-                free_bal = float(asset_info['free'])
-                reduce = 0
-                if asset in self.bal_reduced:
-                    reduce = self.bal_reduced[asset]
-                return free_bal * 99 / 100 - reduce
+            self.last_spot_balance_update_time = current_reset_update_time
+        reduce = 0
+        if asset in self.bal_reduced:
+            reduce = self.bal_reduced[asset]
+        if asset in self.spot_balances:
+            return self.spot_balances[asset] * 99 / 100 - reduce
         return 0
 
     def spot_buy(self, asset, amount, price):
@@ -256,7 +252,6 @@ class BinanceMarket(object):
                 self.log.logger.info('spot {}: order is none or clientOrderId not in order'.format(buy_action))
                 time.sleep(2)
                 return self.spot_buy(asset, amount, price)
-            self.update_spot_balances = True
             self.log.logger.info('cex {} succeed'.format(buy_action))
 
     def spot_sell(self, asset, amount, price):
@@ -285,7 +280,6 @@ class BinanceMarket(object):
             self.log.logger.info('xxxxx--cex sell exception: {}'.format(str(e)))
             self.log.logger.info('xxxxx--cex sell exception: {}'.format(sell_action))
         finally:
-            self.update_spot_balances = True
             if order is None or "clientOrderId" not in order:
                 self.log.logger.info('spot {}: order is none or clientOrderId not in order'.format(sell_action))
                 time.sleep(2)
@@ -338,8 +332,58 @@ class BinanceMarket(object):
                     pass
 
 
+    def spot_stream_data_from_stream_buffer(self, binance_websocket_api_manager):
+        while True:
+            if binance_websocket_api_manager.is_manager_stopping():
+                exit(0)
+            oldest_stream_data_from_stream_buffer = binance_websocket_api_manager.pop_stream_data_from_stream_buffer()
+            if oldest_stream_data_from_stream_buffer is False:
+                time.sleep(0.01)
+            else:
+                # print(oldest_stream_data_from_stream_buffer)
+                stream = json.loads(oldest_stream_data_from_stream_buffer)
+                if 'e' in stream and stream['e'] == 'outboundAccountPosition':
+                    for bal in stream['B']:
+                        self.spot_balances[bal['a']] = float(bal['f'])
+
+    def update_spot_userdata(self):
+        binance_com_websocket_api_manager = BinanceWebSocketApiManager(exchange="binance.com",
+                                                               throw_exception_if_unrepairable=True)
+        binance_com_user_data_stream_id = binance_com_websocket_api_manager.create_stream('arr', '!userData',
+                                                                                  api_key=self.public,
+                                                                                  api_secret=self.secret)
+        # start a worker process to move the received stream_data from the stream_buffer to a print function
+        worker_thread = threading.Thread(target=self.spot_stream_data_from_stream_buffer, args=(binance_com_websocket_api_manager,))
+        worker_thread.start()
+
+    def margin_stream_data_from_stream_buffer(self, binance_websocket_api_manager):
+        while True:
+            if binance_websocket_api_manager.is_manager_stopping():
+                exit(0)
+            oldest_stream_data_from_stream_buffer = binance_websocket_api_manager.pop_stream_data_from_stream_buffer()
+            if oldest_stream_data_from_stream_buffer is False:
+                time.sleep(0.01)
+            else:
+                # print(oldest_stream_data_from_stream_buffer)
+                stream = json.loads(oldest_stream_data_from_stream_buffer)
+                if 'e' in stream and stream['e'] == 'outboundAccountPosition':
+                    for bal in stream['B']:
+                        self.margin_balances[bal['a']] = float(bal['f'])
+
+    def update_margin_userdata(self):
+        binance_com_websocket_api_manager = BinanceWebSocketApiManager(exchange="binance.com-margin",
+                                                               throw_exception_if_unrepairable=True)
+        binance_com_user_data_stream_id = binance_com_websocket_api_manager.create_stream('arr', '!userData',
+                                                                                  api_key=self.public,
+                                                                                  api_secret=self.secret)
+        # start a worker process to move the received stream_data from the stream_buffer to a print function
+        worker_thread = threading.Thread(target=self.margin_stream_data_from_stream_buffer, args=(binance_com_websocket_api_manager,))
+        worker_thread.start()
+
 if __name__ == "__main__":
     log = Logger('all.log',level='debug')
     binance = BinanceMarket(log)
-    print(binance.get_precision())
+    binance.update_spot_userdata()
+    binance.update_margin_userdata()
+    time.sleep(1000)
  

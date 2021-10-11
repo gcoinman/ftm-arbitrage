@@ -59,7 +59,7 @@ dex_swap = DexSwap(log)
 binance = BinanceMarket(log)
 
 
-thread_count = 3
+thread_count = 5
 threadpool = ThreadPoolExecutor(max_workers=thread_count)
 tasks = {}
 
@@ -471,7 +471,7 @@ def spiex_multi_hop_arbitrage():
         if btm_depth is None:
             return
         btm_buy_price, _, _, _ = get_depth_volume_price(4, btm_depth)
-        for s_pair in dex_swap.multi_pairs:
+        for s_pair in dex_swap.spiex_multi_pairs:
             symbols = s_pair.split("_")
             base_depth = get_valid_depth(binance.depths, symbols[0]+'USDT')
             quote_depth = get_valid_depth(binance.depths, symbols[2]+'USDT')
@@ -505,7 +505,7 @@ def spiex_multi_hop_arbitrage():
                 max_quote_trade_amount = max_usdt_trade_amount / quote_buy_price
                 dex_trade_amount = min(10 ** 18 * max_quote_trade_amount, dex_quote_bal, 10 ** 18 * min(cex_base_bal, base_sell_volume) * cex_sell_price, 10 ** 18 * quote_buy_volume) * 98 / 100  
                 price_limit = (cex_sell_price / (1 + price_percent_difference_threshold))
-                if dex_trade_amount * quote_buy_price / btm_buy_price < 10 ** 18:
+                if dex_trade_amount * quote_buy_price < 100 * 10 ** 18:
                     continue
                 price, dex_quote_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'buy', price_limit, dexname)
                 cex_base_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_quote_trade_amount, symbols[2], symbols[1], symbols[0], dexname) / 10 ** 18
@@ -530,7 +530,7 @@ def spiex_multi_hop_arbitrage():
                 max_base_trade_amount = max_usdt_trade_amount / base_buy_price
                 dex_trade_amount = min(dex_base_bal, 10 ** 18 * max_base_trade_amount, 10 ** 18 * min(cex_quote_bal, quote_sell_volume) * quote_sell_price / base_buy_price, 10 ** 18 * base_buy_volume) * 98 / 100
                 price_limit = cex_buy_price * (1 + price_percent_difference_threshold)
-                if dex_trade_amount * base_buy_price / btm_buy_price < 10 ** 18:
+                if dex_trade_amount * base_buy_price < 100 * 10 ** 18:
                     continue
                 price, dex_base_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'sell', price_limit, dexname)
                 cex_quote_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_base_trade_amount, symbols[0], symbols[1], symbols[2], dexname) / 10 ** 18
@@ -593,7 +593,7 @@ def spooky_multi_hop_arbitrage():
                 max_quote_trade_amount = max_usdt_trade_amount / quote_buy_price
                 dex_trade_amount = min(10 ** 18 * max_quote_trade_amount, dex_quote_bal, 10 ** 18 * min(cex_base_bal, base_sell_volume) * cex_sell_price, 10 ** 18 * quote_buy_volume) * 98 / 100  
                 price_limit = (cex_sell_price / (1 + price_percent_difference_threshold))
-                if dex_trade_amount * quote_buy_price / btm_buy_price < 10 ** 18:
+                if dex_trade_amount * quote_buy_price < 100 * 10 ** 18:
                     continue
                 price, dex_quote_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'buy', price_limit, dexname)
                 cex_base_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_quote_trade_amount, symbols[2], symbols[1], symbols[0], dexname) / 10 ** 18
@@ -618,7 +618,7 @@ def spooky_multi_hop_arbitrage():
                 max_base_trade_amount = max_usdt_trade_amount / base_buy_price
                 dex_trade_amount = min(dex_base_bal, 10 ** 18 * max_base_trade_amount, 10 ** 18 * min(cex_quote_bal, quote_sell_volume) * quote_sell_price / base_buy_price, 10 ** 18 * base_buy_volume) * 98 / 100
                 price_limit = cex_buy_price * (1 + price_percent_difference_threshold)
-                if dex_trade_amount * base_buy_price / btm_buy_price < 10 ** 18:
+                if dex_trade_amount * base_buy_price < 100 * 10 ** 18:
                     continue
                 price, dex_base_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'sell', price_limit, dexname)
                 cex_quote_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_base_trade_amount, symbols[0], symbols[1], symbols[2], dexname) / 10 ** 18
@@ -682,7 +682,7 @@ def sushi_multi_hop_arbitrage():
                 max_quote_trade_amount = max_usdt_trade_amount / quote_buy_price
                 dex_trade_amount = min(10 ** 18 * max_quote_trade_amount, dex_quote_bal, 10 ** 18 * min(cex_base_bal, base_sell_volume) * cex_sell_price, 10 ** 18 * quote_buy_volume) * 98 / 100  
                 price_limit = (cex_sell_price / (1 + price_percent_difference_threshold))
-                if dex_trade_amount * quote_buy_price / btm_buy_price < 10 ** 18:
+                if dex_trade_amount * quote_buy_price < 100 * 10 ** 18:
                     continue
                 price, dex_quote_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'buy', price_limit, dexname)
                 cex_base_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_quote_trade_amount, symbols[2], symbols[1], symbols[0], dexname) / 10 ** 18
@@ -707,7 +707,7 @@ def sushi_multi_hop_arbitrage():
                 max_base_trade_amount = max_usdt_trade_amount / base_buy_price
                 dex_trade_amount = min(dex_base_bal, 10 ** 18 * max_base_trade_amount, 10 ** 18 * min(cex_quote_bal, quote_sell_volume) * quote_sell_price / base_buy_price, 10 ** 18 * base_buy_volume) * 98 / 100
                 price_limit = cex_buy_price * (1 + price_percent_difference_threshold)
-                if dex_trade_amount * base_buy_price / btm_buy_price < 10 ** 18:
+                if dex_trade_amount * base_buy_price < 100 * 10 ** 18:
                     continue
                 price, dex_base_trade_amount = dex_swap.binary_search_multi_hop(symbols[0], symbols[1], symbols[2]+dexname, dex_trade_amount, 'sell', price_limit, dexname)
                 cex_quote_sell_amount = dex_swap.extGetOutputAmountMultiHop(dex_base_trade_amount, symbols[0], symbols[1], symbols[2], dexname) / 10 ** 18
@@ -795,7 +795,7 @@ def is_withdraw_enable(assets_info):
     for asset_info in assets_info:
         if asset_info['coin'].upper() == 'FTM':
             for network in asset_info['networkList']:
-                if network['name'] == 'FTM':
+                if network['network'] == 'FTM':
                     return network['withdrawEnable']
     return False
 
@@ -803,7 +803,7 @@ def is_deposit_enable(assets_info):
     for asset_info in assets_info:
         if asset_info['coin'].upper() == 'FTM':
             for network in asset_info['networkList']:
-                if network['name'] == 'FTM':
+                if network['network'] == 'FTM':
                     return network['depositEnable']
     return False
 
@@ -817,10 +817,11 @@ def check_ftm_balance():
                         asset='FTM',
                         amount=spot_ftm_bal)
             assets_info = get_asset_info(timestamp = int(time.time() * 1000))
+            dex_swap.update_information()
             dex_ftm_bal = dex_swap.asset_balance('FTM') / 10 ** 18
-            withdraw_amount = 400000
-            if dex_ftm_bal < 20000 and is_withdraw_enable(assets_info):
-                print('FTM withdraw to dex wallet')
+            withdraw_amount = 100000
+            if dex_ftm_bal < 100000 and is_withdraw_enable(assets_info):
+                print('FTM withdraw to dex wallet, dex ftm balance is {}'.format(dex_ftm_bal))
                 binance.client.transfer_margin_to_spot(
                         asset='FTM',
                         amount=withdraw_amount)
@@ -832,10 +833,10 @@ def check_ftm_balance():
                     network='FTM')
                 wait_for_withdraw_complete(resp['id'])
             
-            margin_ftm_bal = binance.margin_get_balance('FTM')
-            if margin_ftm_bal < 20000 and is_deposit_enable(assets_info):
-                print('FTM deposit to cex')
-                txid = dex_swap.transfer_ftm(300000 * 10 ** 18)
+            if dex_ftm_bal > 600000 and is_deposit_enable(assets_info):
+                deposit_amount = dex_ftm_bal - 550000
+                print('FTM deposit to cex amount is {}'.format(deposit_amount))
+                txid = dex_swap.transfer_ftm(deposit_amount * 10 ** 18)
                 if txid is None:
                     time.sleep(3)
                     continue
@@ -849,8 +850,8 @@ def check_ftm_balance():
 
 def main():
     binance.start_update_depth()
-    binance.margin_get_balances()
-    binance.spot_get_balances()
+    binance.update_spot_userdata()
+    binance.update_margin_userdata()
     dex_swap.update_information()
     t = threading.Thread(target=check_ftm_balance)
     t.start()
@@ -878,11 +879,11 @@ def main():
             else:
                 set_working_flag('false')
         except func_timeout.exceptions.FunctionTimedOut:
-            print('sell_mdx time out')
+            print('update_information time out')
         except Exception as e:
             print(e)
         finally:
-            time.sleep(0.5)
+            time.sleep(1)
 
 if __name__ == '__main__':
     main()
