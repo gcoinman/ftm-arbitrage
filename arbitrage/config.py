@@ -97,4 +97,4 @@ min_profit1 = 3
 max_usdt_trade_amount = 10000
 
 
-max_on_chain_balances = {'BTC': 15, 'ETH': 200, 'SUSHI': 20000, 'YFI': 4, 'LINK': 22000, 'AAVE': 600, 'CRV': 90000, 'BNB': 800}
+max_on_chain_balances = {'FTM': 400000, 'BTC': 15, 'ETH': 200, 'SUSHI': 30000, 'YFI': 9, 'LINK': 22000, 'AAVE': 600, 'CRV': 100000, 'BNB': 600}

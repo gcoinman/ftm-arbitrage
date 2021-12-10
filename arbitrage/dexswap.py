@@ -26,9 +26,9 @@ lock = threading.Lock()
 
 class DexSwap(object):
     def __init__(self, _log, login=True):
-        self.init_gas_price = 1000000000000
-        self.gas_price = 1500000000000
-        self.max_gas_price = 4000000000000
+        self.init_gas_price = 2000000000000
+        self.gas_price = 2000000000000
+        self.max_gas_price = 6000000000000
 
         self.init(login)
         self.log = _log
@@ -45,15 +45,14 @@ class DexSwap(object):
         self.spiex_multi_pairs = self.find_multi_paths('SPIEX')
         self.spooky_multi_pairs = self.find_multi_paths('SPKY')
         self.sushi_multi_pairs = self.find_multi_paths('SUSHIEX')
-        # self.w3 = Web3(Web3.WebsocketProvider('wss://wsapi.fantom.network'))
+        #self.w3 = Web3(Web3.WebsocketProvider('wss://wsapi.fantom.network'))
         # self.w3 = Web3(Web3.HTTPProvider('https://rpc.neist.io'))
-        # self.w3 = Web3(Web3.HTTPProvider('https://nameless-white-cloud.fantom.quiknode.pro/e4fca9b59eee4c6ea1a7cc0fdc5c2b21171bf35a/'))
-        self.w3 = Web3(Web3.WebsocketProvider('wss://nameless-white-cloud.fantom.quiknode.pro/e4fca9b59eee4c6ea1a7cc0fdc5c2b21171bf35a/'))
+        self.w3 = Web3(Web3.WebsocketProvider('wss://old-cold-silence.fantom.quiknode.pro/8ed59647681df77735da2675989da15abdf23ac3/'))
 
     def init(self, login):
-        # self.netid='ftm_neist'
+        #self.netid='ftm_neist'
         self.netid='quicknode'
-        # self.netid='ftm2'
+        #self.netid='ftm2'
         network.connect(self.netid)
         network.gas_price(self.gas_price)
         network.gas_limit(2100000)
@@ -858,7 +857,7 @@ class DexSwap(object):
 
     @func_set_timeout(28)
     def do_transfer(self, amount):
-        tx = self.acct.transfer('0xF4A6D62A53283BF4076416E79c5f04c9d75a7216', amount, required_confs=1)
+        tx = self.acct.transfer('0x10425CcBDAF89A7b9Ff67A5053501CD0ea1397C4', amount, required_confs=1)
         return tx
 
     def transfer_ftm(self, amount):

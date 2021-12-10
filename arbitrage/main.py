@@ -833,8 +833,8 @@ def check_ftm_balance():
                     network='FTM')
                 wait_for_withdraw_complete(resp['id'])
             
-            if dex_ftm_bal > 600000 and is_deposit_enable(assets_info):
-                deposit_amount = dex_ftm_bal - 550000
+            if dex_ftm_bal > 350000 and is_deposit_enable(assets_info):
+                deposit_amount = dex_ftm_bal - 300000
                 print('FTM deposit to cex amount is {}'.format(deposit_amount))
                 txid = dex_swap.transfer_ftm(deposit_amount * 10 ** 18)
                 if txid is None:

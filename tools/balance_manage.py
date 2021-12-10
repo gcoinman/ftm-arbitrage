@@ -27,7 +27,7 @@ assets.remove('DEGO')
 spot_assets.remove('DEGO')
 if 'DEGO' in assets or 'DEGO' in spot_assets:
     raise
-cex_wallet = '0xF4A6D62A53283BF4076416E79c5f04c9d75a7216'
+cex_wallet = '0x10425CcBDAF89A7b9Ff67A5053501CD0ea1397C4'
 admin_wallet = '0x9D945d909Ca91937d19563e30bB4DAc12C860189'
 
 last_order_time = int(time.time())
